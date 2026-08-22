@@ -1,0 +1,5 @@
+{
+  "postgres_url": "postgresql://username:password@host:5432/database_name",
+  "pikpak_password": "your_shared_pikpak_password",
+  "torrentio_url": "https://torrentio.strem.fun"
+}
