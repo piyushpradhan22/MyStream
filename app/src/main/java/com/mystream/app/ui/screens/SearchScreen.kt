@@ -83,9 +83,11 @@ import com.mystream.app.ui.theme.TextSecondary
 fun SearchScreen(
     repository: SourcesRepository,
     onBack: () -> Unit,
-    onNavigateToDetail: (type: String, id: String) -> Unit
+    onNavigateToDetail: (type: String, id: String) -> Unit,
+    // Pre-populated query from Google Assistant voice search or launcher shortcut
+    initialQuery: String = ""
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf(initialQuery) }
     var rawResults by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
     var trendingItems by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
     var selectedFilter by remember { mutableStateOf("All") } // "All", "Movies", "Series"
@@ -155,6 +157,15 @@ fun SearchScreen(
             } finally {
                 isSearching = false
             }
+        }
+    }
+
+    // If launched with a pre-filled voice-search query (e.g. "Hey Google, play X on MyStream"),
+    // trigger search automatically once the composable is ready
+    LaunchedEffect(initialQuery) {
+        if (initialQuery.isNotBlank()) {
+            delay(150) // allow composable to settle
+            performSearch(initialQuery)
         }
     }
 

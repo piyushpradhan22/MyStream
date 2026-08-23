@@ -173,6 +173,29 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            // Voice search handoff: "Hey Google, play X on MyStream" fires
+            // mystream://search?q=X → opens SearchScreen pre-filled with the query
+            composable(
+                route = "searchq?q={q}",
+                arguments = listOf(
+                    navArgument("q") { type = NavType.StringType; defaultValue = "" }
+                ),
+                deepLinks = listOf(
+                    navDeepLink { uriPattern = "mystream://search?q={q}" }
+                )
+            ) { backStackEntry ->
+                val rawQ = backStackEntry.arguments?.getString("q") ?: ""
+                val initialQuery = try { java.net.URLDecoder.decode(rawQ, "UTF-8") } catch (_: Exception) { rawQ }
+                SearchScreen(
+                    repository = app.sourcesRepository,
+                    initialQuery = initialQuery,
+                    onBack = { navController.popBackStack() },
+                    onNavigateToDetail = { type, id ->
+                        navController.navigate("detail/$type/$id")
+                    }
+                )
+            }
+
             composable("sources") {
                 SettingsScreen(
                     repository = app.sourcesRepository,

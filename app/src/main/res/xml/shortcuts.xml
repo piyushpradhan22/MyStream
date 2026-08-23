@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    shortcuts.xml — Google TV / Android TV launcher long-press shortcuts.
+    Long-pressing the MyStream icon in the TV launcher reveals these quick actions.
+    Each shortcutId maps to a mystream:// deep-link handled by MainActivity.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Shortcut 1: Search — most commonly needed on TV -->
+    <shortcut
+        android:shortcutId="shortcut_search"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_search"
+        android:shortcutShortLabel="@string/shortcut_search_short"
+        android:shortcutLongLabel="@string/shortcut_search_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="mystream://search"
+            android:targetPackage="com.mystream.app"
+            android:targetClass="com.mystream.app.MainActivity" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <!-- Shortcut 2: Continue Watching -->
+    <shortcut
+        android:shortcutId="shortcut_continue"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_continue"
+        android:shortcutShortLabel="@string/shortcut_continue_short"
+        android:shortcutLongLabel="@string/shortcut_continue_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="mystream://home?section=continue"
+            android:targetPackage="com.mystream.app"
+            android:targetClass="com.mystream.app.MainActivity" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <!-- Shortcut 3: My Watchlist -->
+    <shortcut
+        android:shortcutId="shortcut_watchlist"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_watchlist"
+        android:shortcutShortLabel="@string/shortcut_watchlist_short"
+        android:shortcutLongLabel="@string/shortcut_watchlist_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="mystream://home?section=watchlist"
+            android:targetPackage="com.mystream.app"
+            android:targetClass="com.mystream.app.MainActivity" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+</shortcuts>

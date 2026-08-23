@@ -18,4 +18,16 @@
     <string name="enter_stream_url">Enter direct video URL (m3u8, mpd, mp4, mkv)</string>
     <string name="add_source">Add Stremio Addon URL</string>
     <string name="enter_addon_url">Enter manifest.json URL</string>
+
+    <!-- Google TV Assistant / Launcher integration strings -->
+    <string name="search_hint">Search MyStream…</string>
+
+    <!-- App Shortcuts — shown on long-pressing the launcher icon -->
+    <string name="shortcut_search_short">Search</string>
+    <string name="shortcut_search_long">Search Movies &amp; Series</string>
+    <string name="shortcut_continue_short">Resume</string>
+    <string name="shortcut_continue_long">Continue Watching</string>
+    <string name="shortcut_watchlist_short">Watchlist</string>
+    <string name="shortcut_watchlist_long">My Watchlist</string>
 </resources>
+
