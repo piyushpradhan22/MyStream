@@ -108,9 +108,9 @@ class PikPakStreamResolver(
     }
 
     suspend fun fetchAllTorrentioTorrents(type: String, id: String): List<StremioStreamSource> = withContext(Dispatchers.IO) {
-        val torrentioFilteredBase = "https://torrentio.strem.fun/language=hindi|qualityfilter=480p,other,scr,cam,unknown|sizefilter=6GB"
+        val torrentioBase = "https://torrentio.strem.fun/language=hindi|qualityfilter=480p,other,scr,cam,unknown"
         try {
-            val rawTorrents = stremioClient.getStreams(torrentioFilteredBase, type, id)
+            val rawTorrents = stremioClient.getStreams(torrentioBase, type, id)
             val collectionKeywords = listOf("complete", "collection", "pack", "moviesup")
             val filteredTorrents = mutableListOf<StremioStreamSource>()
             val lowerPriorityTorrents = mutableListOf<StremioStreamSource>()
@@ -118,14 +118,11 @@ class PikPakStreamResolver(
             for (torr in rawTorrents) {
                 val titleLower = torr.title.orEmpty().lowercase()
                 val hasCollection = collectionKeywords.any { titleLower.contains(it) }
-                val sizeMb = parseFileSizeMb(torr.title.orEmpty())
 
-                if (sizeMb < 5800.0) {
-                    if (!hasCollection) {
-                        filteredTorrents.add(torr)
-                    } else {
-                        lowerPriorityTorrents.add(torr)
-                    }
+                if (!hasCollection) {
+                    filteredTorrents.add(torr)
+                } else {
+                    lowerPriorityTorrents.add(torr)
                 }
             }
             filteredTorrents.addAll(lowerPriorityTorrents)

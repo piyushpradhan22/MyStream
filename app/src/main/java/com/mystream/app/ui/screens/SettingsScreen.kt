@@ -1,6 +1,7 @@
 package com.mystream.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,11 +24,14 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -63,6 +67,11 @@ import com.mystream.app.ui.theme.TextPrimary
 import com.mystream.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.LocalContext
+import com.mystream.app.BuildConfig
+import com.mystream.app.data.updater.AppUpdateCheckResult
+import com.mystream.app.data.updater.AppUpdateManager
+import com.mystream.app.ui.components.AppUpdateDialog
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -98,6 +107,45 @@ fun SettingsScreen(
     }
 
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val updateManager = remember { AppUpdateManager(context) }
+    var isCheckingUpdate by remember { mutableStateOf(false) }
+    var updateResult by remember { mutableStateOf<AppUpdateCheckResult?>(null) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    var isDownloadingUpdate by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableStateOf(0) }
+    var updateError by remember { mutableStateOf<String?>(null) }
+    var updateStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    if (showUpdateDialog && updateResult != null) {
+        AppUpdateDialog(
+            updateInfo = updateResult!!,
+            isDownloading = isDownloadingUpdate,
+            downloadProgress = downloadProgress,
+            errorMessage = updateError,
+            onDismiss = { showUpdateDialog = false },
+            onStartDownload = {
+                scope.launch {
+                    isDownloadingUpdate = true
+                    downloadProgress = 0
+                    updateError = null
+                    val dlRes = updateManager.downloadApk(updateResult!!.downloadUrl) { progress ->
+                        downloadProgress = progress
+                    }
+                    isDownloadingUpdate = false
+                    val apkFile = dlRes.getOrNull()
+                    if (apkFile != null) {
+                        val installRes = updateManager.installApk(apkFile)
+                        if (installRes.isFailure) {
+                            updateError = "Install failed: ${installRes.exceptionOrNull()?.message}"
+                        }
+                    } else {
+                        updateError = dlRes.exceptionOrNull()?.message ?: "Download failed"
+                    }
+                }
+            }
+        )
+    }
 
     Box(
         modifier = Modifier
@@ -680,6 +728,120 @@ fun SettingsScreen(
                             tint = PrimaryNeon,
                             modifier = Modifier.size(20.dp)
                         )
+                    }
+                }
+
+                // Section 6: App Version & Updates
+                item {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(
+                        text = "6. App Version & Updates",
+                        color = PrimaryNeon,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x22FFFFFF)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "MyStream Android",
+                                        color = TextPrimary,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                                        color = TextMuted,
+                                        fontSize = 11.5.sp
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(PrimaryNeon.copy(alpha = 0.15f))
+                                        .border(1.dp, PrimaryNeon.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            if (isCheckingUpdate) return@clickable
+                                            scope.launch {
+                                                isCheckingUpdate = true
+                                                updateStatusMessage = null
+                                                updateError = null
+                                                val res = updateManager.checkForUpdates()
+                                                isCheckingUpdate = false
+                                                val info = res.getOrNull()
+                                                if (info != null) {
+                                                    updateResult = info
+                                                    if (info.isUpdateAvailable) {
+                                                        showUpdateDialog = true
+                                                    } else {
+                                                        updateStatusMessage = "You're on the latest version (v${info.currentVersionName})"
+                                                        android.widget.Toast.makeText(context, "You are using the latest version!", android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                } else {
+                                                    val msg = res.exceptionOrNull()?.message ?: "Failed to check updates"
+                                                    updateStatusMessage = msg
+                                                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        if (isCheckingUpdate) {
+                                            CircularProgressIndicator(
+                                                color = PrimaryNeon,
+                                                modifier = Modifier.size(13.dp),
+                                                strokeWidth = 1.8.dp
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.SystemUpdate,
+                                                contentDescription = null,
+                                                tint = PrimaryNeon,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                        Text(
+                                            text = if (isCheckingUpdate) "Checking..." else "Check for Updates",
+                                            color = PrimaryNeon,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.5.sp
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (!updateStatusMessage.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = updateStatusMessage!!,
+                                    color = if (updateStatusMessage!!.contains("latest", ignoreCase = true) || updateStatusMessage!!.contains("up to date", ignoreCase = true)) SecondaryCyan else AccentAmber,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -60,6 +62,8 @@ fun StreamCard(
     onClick: () -> Unit,
     onRestart: (() -> Unit)? = null,
     onMagnetStream: (() -> Unit)? = null,
+    onWatchlistToggle: (() -> Unit)? = null,
+    isSavedToWatchlist: Boolean = false,
     actionButtonText: String = "🧲 P2P",
     modifier: Modifier = Modifier,
     isResolving: Boolean = false
@@ -67,6 +71,7 @@ fun StreamCard(
     val cardFocusRequester = remember { FocusRequester() }
     val restartFocusRequester = remember { FocusRequester() }
     val magnetFocusRequester = remember { FocusRequester() }
+    val watchlistFocusRequester = remember { FocusRequester() }
 
     val cardInteractionSource = remember { MutableInteractionSource() }
     val isCardFocused by cardInteractionSource.collectIsFocusedAsState()
@@ -76,6 +81,9 @@ fun StreamCard(
 
     val magnetInteractionSource = remember { MutableInteractionSource() }
     val isMagnetFocused by magnetInteractionSource.collectIsFocusedAsState()
+
+    val watchlistInteractionSource = remember { MutableInteractionSource() }
+    val isWatchlistFocused by watchlistInteractionSource.collectIsFocusedAsState()
 
     var hasSeedFocus by remember { mutableStateOf(false) }
 
@@ -245,7 +253,10 @@ fun StreamCard(
                                         }
 
                                         Key.DirectionRight -> {
-                                            if (onRestart != null) {
+                                            if (onWatchlistToggle != null) {
+                                                watchlistFocusRequester.requestFocus()
+                                                true
+                                            } else if (onRestart != null) {
                                                 restartFocusRequester.requestFocus()
                                                 true
                                             } else {
@@ -264,7 +275,7 @@ fun StreamCard(
                                     RoundedCornerShape(6.dp)
                                 )
                                 .clickable(interactionSource = magnetInteractionSource, indication = null) { onMagnetStream() }
-                                .padding(horizontal = 7.dp, vertical = 3.5.dp),
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -272,6 +283,36 @@ fun StreamCard(
                                 color = AccentAmber,
                                 fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // Watchlist button
+                    if (onWatchlistToggle != null) {
+                        Box(
+                            modifier = Modifier
+                                .focusRequester(watchlistFocusRequester)
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(if (isWatchlistFocused) SecondaryCyan.copy(alpha = 0.25f) else SurfaceDark)
+                                .border(
+                                    if (isWatchlistFocused) 2.dp else 1.dp,
+                                    if (isSavedToWatchlist) SecondaryCyan else Color(0x33FFFFFF),
+                                    CircleShape
+                                )
+                                .focusable(interactionSource = watchlistInteractionSource)
+                                .clickable(
+                                    interactionSource = watchlistInteractionSource,
+                                    indication = null,
+                                    onClick = onWatchlistToggle
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isSavedToWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                contentDescription = "Toggle Watchlist",
+                                tint = if (isSavedToWatchlist) SecondaryCyan else TextMuted,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }

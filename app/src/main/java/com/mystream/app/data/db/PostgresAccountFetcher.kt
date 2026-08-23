@@ -218,6 +218,8 @@ object PostgresAccountFetcher {
 
             val candidateQueries = listOf(
                 "SELECT email FROM email WHERE used IS NOT TRUE AND email LIKE '%@gmail.com' ORDER BY RANDOM() LIMIT 20",
+                "SELECT email FROM email WHERE email LIKE '%@gmail.com' ORDER BY RANDOM() LIMIT 20",
+                "SELECT email FROM email WHERE email IS NOT NULL AND email != '' ORDER BY RANDOM() LIMIT 20",
                 "SELECT email FROM selected_email WHERE email IS NOT NULL AND email != '' ORDER BY RANDOM() LIMIT 20"
             )
 

@@ -72,6 +72,7 @@ class SourcesRepository(
         private val CATALOG_SOURCES_KEY = stringPreferencesKey("installed_catalog_sources")
         private val APP_SETTINGS_KEY = stringPreferencesKey("app_settings_config")
         private val PLAYBACK_PROGRESS_KEY = stringPreferencesKey("playback_progress_records")
+        private val WATCHLIST_KEY = stringPreferencesKey("user_watchlist_items")
     }
 
     val catalogSourcesFlow: Flow<List<MediaSourceEntity>> = context.dataStore.data.map { prefs ->
@@ -111,6 +112,53 @@ class SourcesRepository(
             } catch (e: Exception) {
                 emptyList()
             }
+        }
+    }
+
+    val watchlistFlow: Flow<List<com.mystream.app.data.model.WatchlistItem>> = context.dataStore.data.map { prefs ->
+        val raw = prefs[WATCHLIST_KEY]
+        if (raw.isNullOrBlank()) emptyList()
+        else {
+            try {
+                json.decodeFromString<List<com.mystream.app.data.model.WatchlistItem>>(raw)
+                    .sortedByDescending { it.dateAddedMs }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun addToWatchlist(item: com.mystream.app.data.model.WatchlistItem) {
+        context.dataStore.edit { prefs ->
+            val current = try {
+                val raw = prefs[WATCHLIST_KEY]
+                if (raw.isNullOrBlank()) emptyList()
+                else json.decodeFromString<List<com.mystream.app.data.model.WatchlistItem>>(raw)
+            } catch (e: Exception) {
+                emptyList()
+            }
+            val updated = (listOf(item.copy(dateAddedMs = System.currentTimeMillis())) + current.filter { it.id != item.id }).take(100)
+            prefs[WATCHLIST_KEY] = json.encodeToString(updated)
+        }
+    }
+
+    suspend fun removeFromWatchlist(id: String) {
+        context.dataStore.edit { prefs ->
+            val current = try {
+                val raw = prefs[WATCHLIST_KEY]
+                if (raw.isNullOrBlank()) emptyList()
+                else json.decodeFromString<List<com.mystream.app.data.model.WatchlistItem>>(raw)
+            } catch (e: Exception) {
+                emptyList()
+            }
+            val updated = current.filter { it.id != id }
+            prefs[WATCHLIST_KEY] = json.encodeToString(updated)
+        }
+    }
+
+    suspend fun clearAllWatchlist() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(WATCHLIST_KEY)
         }
     }
 

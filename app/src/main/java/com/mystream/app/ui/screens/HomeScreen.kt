@@ -78,6 +78,7 @@ fun HomeScreen(
 ) {
     val scope = rememberCoroutineScope()
     val continueWatchingList by repository.continueWatchingFlow.collectAsState(initial = emptyList())
+    val watchlist by repository.watchlistFlow.collectAsState(initial = emptyList())
 
     var topMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
     var topSeries by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
@@ -305,6 +306,98 @@ fun HomeScreen(
                                         },
                                         onClick = {
                                             onNavigateToDetail(record.type, record.imdbId)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Watchlist Section
+                if (watchlist.isNotEmpty()) {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "My Watchlist",
+                                        color = TextPrimary,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(SecondaryCyan.copy(alpha = 0.15f))
+                                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = "${watchlist.size}",
+                                            color = SecondaryCyan,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                // Clear All button
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(SurfaceCard)
+                                        .clickable {
+                                            scope.launch {
+                                                repository.clearAllWatchlist()
+                                            }
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "Clear All",
+                                        color = TextMuted,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                items(watchlist, key = { it.id }) { item ->
+                                    val preview = StremioMetaPreview(
+                                        id = item.imdbId,
+                                        type = item.type,
+                                        name = item.title,
+                                        poster = item.posterUrl,
+                                        genres = listOfNotNull(item.subtitle ?: item.torrentQuality)
+                                    )
+                                    PosterCard(
+                                        item = preview,
+                                        progressFraction = null,
+                                        onClearClick = {
+                                            scope.launch {
+                                                repository.removeFromWatchlist(item.id)
+                                            }
+                                        },
+                                        onClick = {
+                                            onNavigateToDetail(item.type, item.imdbId)
                                         }
                                     )
                                 }

@@ -178,6 +178,27 @@ data class StremioStreamSource(
             return regex.find(text)?.value?.uppercase()
         }
 
+    val fileSizeMb: Double
+        get() {
+            val fullText = "${name.orEmpty()} ${title.orEmpty()}".replace("\n", " ")
+            if (fullText.contains("💾")) {
+                val afterSave = fullText.substringAfter("💾").trim()
+                val sizePart = afterSave.substringBefore("⚙️").substringBefore("👤").trim()
+                val regex = Regex("""([0-9]+(?:\.[0-9]+)?)\s*(GB|MB|GiB|MiB)""", RegexOption.IGNORE_CASE)
+                val match = regex.find(sizePart)
+                if (match != null) {
+                    val num = match.groupValues[1].toDoubleOrNull() ?: 2000.0
+                    val unit = match.groupValues[2].uppercase()
+                    return if (unit.contains("GB") || unit.contains("GIB")) num * 1024.0 else num
+                }
+            }
+            val regex = Regex("""([0-9]+(?:\.[0-9]+)?)\s*(GB|MB|GiB|MiB)""", RegexOption.IGNORE_CASE)
+            val match = regex.find(fullText) ?: return 2000.0
+            val num = match.groupValues[1].toDoubleOrNull() ?: 2000.0
+            val unit = match.groupValues[2].uppercase()
+            return if (unit.contains("GB") || unit.contains("GIB")) num * 1024.0 else num
+        }
+
     val seeders: String?
         get() {
             val text = (name.orEmpty() + " " + title.orEmpty())
@@ -314,4 +335,21 @@ data class PlaybackProgressRecord(
     val progressFraction: Float
         get() = if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
 }
+
+@Serializable
+data class WatchlistItem(
+    val id: String, // infoHash ?: imdbId
+    val imdbId: String,
+    val title: String,
+    val subtitle: String? = null,
+    val posterUrl: String? = null,
+    val backdropUrl: String? = null,
+    val type: String = "movie",
+    val seasonNumber: Int = 0,
+    val episodeNumber: Int = 0,
+    val infoHash: String? = null,
+    val torrentTitle: String? = null,
+    val torrentQuality: String? = null,
+    val dateAddedMs: Long = 0L
+)
 

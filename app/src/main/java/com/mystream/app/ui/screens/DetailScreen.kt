@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddLink
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayCircle
@@ -93,6 +95,7 @@ fun DetailScreen(
     var metaDetail by remember { mutableStateOf<StremioMetaDetail?>(null) }
     var streams by remember { mutableStateOf<List<StremioStreamSource>>(emptyList()) }
     var allTorrents by remember { mutableStateOf<List<StremioStreamSource>>(emptyList()) }
+    val watchlist by repository.watchlistFlow.collectAsState(initial = emptyList())
     var isDetailLoading by remember { mutableStateOf(true) }
     var isStreamsLoading by remember { mutableStateOf(false) }
     var isTorrentsLoading by remember { mutableStateOf(false) }
@@ -115,11 +118,9 @@ fun DetailScreen(
 
     fun loadStreams(queryId: String, forceRefresh: Boolean = false) {
         scope.launch {
-            isStreamsLoading = streams.isEmpty() || forceRefresh
+            isStreamsLoading = true
             isResolvingMoreStreams = true
-            if (forceRefresh) {
-                streams = emptyList()
-            }
+            streams = emptyList()
             try {
                 repository.streamStreamsForMedia(type, queryId, forceRefresh = forceRefresh).collect { newStreams ->
                     streams = newStreams
@@ -137,6 +138,7 @@ fun DetailScreen(
     fun loadAllTorrents(queryId: String) {
         scope.launch {
             isTorrentsLoading = true
+            allTorrents = emptyList()
             try {
                 allTorrents = repository.fetchAllTorrentsForMedia(type, queryId)
             } catch (e: Exception) {
@@ -156,9 +158,10 @@ fun DetailScreen(
             if (!detail.type.equals("series", ignoreCase = true)) {
                 loadStreams(id)
             } else {
-                val firstEp = detail.videos.firstOrNull()
-                selectedEpisode = firstEp
-                firstEp?.id?.let { epId -> loadStreams(epId) }
+                // Do not auto-fetch on initial load for series; wait for user to click an episode
+                selectedEpisode = null
+                streams = emptyList()
+                allTorrents = emptyList()
             }
         } catch (e: Exception) {
             // handle error
@@ -167,9 +170,11 @@ fun DetailScreen(
         }
     }
 
+    var lastLoadedTorrentsQueryId by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(selectedStreamTab, selectedEpisode?.id, metaDetail?.id) {
         val detail = metaDetail ?: return@LaunchedEffect
-        if (selectedStreamTab != 1 || isTorrentsLoading || allTorrents.isNotEmpty()) return@LaunchedEffect
+        if (selectedStreamTab != 1) return@LaunchedEffect
 
         val queryId = if (detail.type.equals("series", ignoreCase = true)) {
             selectedEpisode?.id
@@ -177,7 +182,10 @@ fun DetailScreen(
             detail.id
         }
 
-        queryId?.let { loadAllTorrents(it) }
+        if (queryId != null && (queryId != lastLoadedTorrentsQueryId || allTorrents.isEmpty())) {
+            lastLoadedTorrentsQueryId = queryId
+            loadAllTorrents(queryId)
+        }
     }
 
     Box(
@@ -193,7 +201,7 @@ fun DetailScreen(
             val detail = metaDetail!!
             val isSeries = detail.type.equals("series", ignoreCase = true)
             val seasons = if (isSeries) {
-                detail.videos.map { it.season }.distinct().sorted()
+                detail.videos.map { it.season }.distinct().sortedWith(compareBy { if (it == 0) Int.MAX_VALUE else it })
             } else emptyList()
 
             val currentSeasonEpisodes = if (isSeries && seasons.isNotEmpty()) {
@@ -251,6 +259,46 @@ fun DetailScreen(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back",
                                 tint = Color.White
+                            )
+                        }
+
+                        // Top Watchlist Button
+                        val isMediaInWatchlist = metaDetail?.id?.let { mId -> watchlist.any { it.imdbId == mId } } ?: false
+                        IconButton(
+                            onClick = {
+                                metaDetail?.let { dt ->
+                                    scope.launch {
+                                        if (isMediaInWatchlist) {
+                                            repository.removeFromWatchlist(dt.id)
+                                            android.widget.Toast.makeText(context, "Removed from Watchlist", android.widget.Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            val watchItem = com.mystream.app.data.model.WatchlistItem(
+                                                id = dt.id,
+                                                imdbId = dt.id,
+                                                title = dt.name,
+                                                subtitle = dt.genres.firstOrNull() ?: dt.year,
+                                                posterUrl = dt.poster,
+                                                backdropUrl = dt.background,
+                                                type = dt.type,
+                                                dateAddedMs = System.currentTimeMillis()
+                                            )
+                                            repository.addToWatchlist(watchItem)
+                                            android.widget.Toast.makeText(context, "Added to Watchlist!", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .statusBarsPadding()
+                                .padding(top = 18.dp, end = 16.dp)
+                                .align(Alignment.TopEnd)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x66000000))
+                        ) {
+                            Icon(
+                                imageVector = if (isMediaInWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                contentDescription = "Watchlist",
+                                tint = if (isMediaInWatchlist) SecondaryCyan else Color.White
                             )
                         }
                     }
@@ -338,63 +386,140 @@ fun DetailScreen(
                     }
                 }
 
-                // Series Season Tabs & Episodes
+                // Series Season Tabs & Episodes Carousel
                 if (isSeries && seasons.isNotEmpty()) {
                     item {
-                        ScrollableTabRow(
-                            selectedTabIndex = selectedSeasonIndex,
-                            containerColor = Color.Transparent,
-                            contentColor = PrimaryNeon,
-                            edgePadding = 20.dp,
-                            indicator = { tabPositions ->
-                                TabRowDefaults.SecondaryIndicator(
-                                    Modifier.tabIndicatorOffset(tabPositions[selectedSeasonIndex]),
-                                    color = PrimaryNeon
-                                )
-                            }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp)
                         ) {
-                            seasons.forEachIndexed { index, seasonNum ->
-                                Tab(
-                                    selected = selectedSeasonIndex == index,
-                                    onClick = { selectedSeasonIndex = index },
-                                    text = {
-                                        Text(
-                                            text = "Season $seasonNum",
-                                            fontWeight = if (selectedSeasonIndex == index) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (selectedSeasonIndex == index) PrimaryNeon else TextSecondary
+                            // Season Selector Tabs
+                            ScrollableTabRow(
+                                selectedTabIndex = selectedSeasonIndex,
+                                containerColor = Color.Transparent,
+                                contentColor = PrimaryNeon,
+                                edgePadding = 20.dp,
+                                indicator = { tabPositions ->
+                                    if (selectedSeasonIndex < tabPositions.size) {
+                                        TabRowDefaults.SecondaryIndicator(
+                                            Modifier.tabIndicatorOffset(tabPositions[selectedSeasonIndex]),
+                                            color = PrimaryNeon
                                         )
                                     }
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                    }
-
-                    // Episodes Horizontal / Vertical List
-                    items(currentSeasonEpisodes) { episode ->
-                        val isSelected = selectedEpisode?.id == episode.id
-                        EpisodeCardItem(
-                            episode = episode,
-                            isSelected = isSelected,
-                            onClick = {
-                                selectedEpisode = episode
-                                loadStreams(episode.id)
-                                if (selectedStreamTab == 1) {
-                                    loadAllTorrents(episode.id)
+                                }
+                            ) {
+                                seasons.forEachIndexed { index, seasonNum ->
+                                    Tab(
+                                        selected = selectedSeasonIndex == index,
+                                        onClick = {
+                                            if (selectedSeasonIndex != index) {
+                                                selectedSeasonIndex = index
+                                                selectedEpisode = null
+                                                streams = emptyList()
+                                                allTorrents = emptyList()
+                                            }
+                                        },
+                                        text = {
+                                            Text(
+                                                text = if (seasonNum == 0) "Season 0 (Specials)" else "Season $seasonNum",
+                                                fontWeight = if (selectedSeasonIndex == index) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (selectedSeasonIndex == index) PrimaryNeon else TextSecondary
+                                            )
+                                        }
+                                    )
                                 }
                             }
-                        )
-                    }
 
-                    item {
-                        Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Horizontal Episodes List
+                            androidx.compose.foundation.lazy.LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(currentSeasonEpisodes) { episode ->
+                                    val isSelected = selectedEpisode?.id == episode.id
+                                    EpisodeHorizontalCardItem(
+                                        episode = episode,
+                                        isSelected = isSelected,
+                                        onClick = {
+                                            selectedEpisode = episode
+                                            loadStreams(episode.id)
+                                            if (selectedStreamTab == 1) {
+                                                loadAllTorrents(episode.id)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+
+                            // Selected Episode Info Header Card
+                            selectedEpisode?.let { ep ->
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(SurfaceDark.copy(alpha = 0.6f))
+                                        .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(10.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    val epTitle = ep.name?.takeIf { it.isNotBlank() } ?: "Episode ${ep.episode}"
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(PrimaryNeon.copy(alpha = 0.2f))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = "S${ep.season} E${ep.episode}",
+                                                color = PrimaryNeon,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        Text(
+                                            text = epTitle,
+                                            color = TextPrimary,
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    if (!ep.overview.isNullOrBlank()) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = ep.overview,
+                                            color = TextMuted,
+                                            fontSize = 11.5.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            lineHeight = 16.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
                 // Stream Section Tabs (Available Streams vs All Torrents)
                 item {
-                    val streamHeaderTitle = if (isSeries && selectedEpisode != null) {
-                        "Streams for S${selectedEpisode?.season}E${selectedEpisode?.episode}"
+                    val streamHeaderTitle = if (isSeries) {
+                        if (selectedEpisode != null) {
+                            "Streams for S${selectedEpisode?.season}E${selectedEpisode?.episode}"
+                        } else {
+                            "Episode Streams"
+                        }
                     } else {
                         "Available Streams"
                     }
@@ -529,8 +654,8 @@ fun DetailScreen(
                                 .clickable {
                                     selectedStreamTab = 1
                                     if (allTorrents.isEmpty()) {
-                                        val queryId = if (isSeries) selectedEpisode?.id ?: id else id
-                                        loadAllTorrents(queryId)
+                                        val queryId = if (isSeries) selectedEpisode?.id else id
+                                        queryId?.let { loadAllTorrents(it) }
                                     }
                                 }
                                 .padding(vertical = 9.dp),
@@ -559,7 +684,33 @@ fun DetailScreen(
 
                 // TAB 0: Available Resolved Streams List (Default)
                 if (selectedStreamTab == 0) {
-                    if (isStreamsLoading) {
+                    if (isSeries && selectedEpisode == null) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(28.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Movie,
+                                        contentDescription = null,
+                                        tint = TextMuted,
+                                        modifier = Modifier.size(30.dp)
+                                    )
+                                    Text(
+                                        text = "Select an episode above to fetch streams",
+                                        color = TextMuted,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    } else if (isStreamsLoading) {
                         item {
                             Box(
                                 modifier = Modifier
@@ -651,12 +802,40 @@ fun DetailScreen(
                                 }
                             }
 
+                            val isSavedInWatchlist = watchlist.any { it.id == streamKey || (stream.infoHash != null && it.infoHash == stream.infoHash) }
                             Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 5.dp)) {
                                 StreamCard(
                                     stream = stream,
                                     isResolving = isResolvingThis,
                                     onClick = { launchStream(restartFromBeginning = false) },
-                                    onRestart = { launchStream(restartFromBeginning = true) }
+                                    onRestart = { launchStream(restartFromBeginning = true) },
+                                    onWatchlistToggle = {
+                                        scope.launch {
+                                            if (isSavedInWatchlist) {
+                                                repository.removeFromWatchlist(streamKey)
+                                                stream.infoHash?.let { repository.removeFromWatchlist(it) }
+                                                android.widget.Toast.makeText(context, "Removed from Watchlist", android.widget.Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                val watchItem = com.mystream.app.data.model.WatchlistItem(
+                                                    id = streamKey,
+                                                    imdbId = detail.id,
+                                                    title = if (isSeries && selectedEpisode != null) "${detail.name} (S${selectedEpisode?.season}E${selectedEpisode?.episode})" else detail.name,
+                                                    subtitle = "${stream.quality} • ${stream.providerName ?: "Stream"}",
+                                                    posterUrl = selectedEpisode?.thumbnail ?: detail.poster,
+                                                    backdropUrl = detail.background,
+                                                    type = detail.type,
+                                                    seasonNumber = selectedEpisode?.season ?: 0,
+                                                    episodeNumber = selectedEpisode?.episode ?: 0,
+                                                    infoHash = stream.infoHash,
+                                                    torrentTitle = stream.title ?: stream.name,
+                                                    torrentQuality = stream.quality
+                                                )
+                                                repository.addToWatchlist(watchItem)
+                                                android.widget.Toast.makeText(context, "Added to Watchlist!", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    isSavedToWatchlist = isSavedInWatchlist
                                 )
                             }
                         }
@@ -696,7 +875,33 @@ fun DetailScreen(
                     }
                 } else {
                     // TAB 1: All Candidate Torrents & Magnets (Advanced)
-                    if (isTorrentsLoading) {
+                    if (isSeries && selectedEpisode == null) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(28.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AddLink,
+                                        contentDescription = null,
+                                        tint = TextMuted,
+                                        modifier = Modifier.size(30.dp)
+                                    )
+                                    Text(
+                                        text = "Select an episode above to fetch torrents",
+                                        color = TextMuted,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    } else if (isTorrentsLoading) {
                         item {
                             Box(
                                 modifier = Modifier
@@ -759,12 +964,20 @@ fun DetailScreen(
                                                 headers = torr.behaviorHints?.proxyHeaders
                                             )
                                             onPlay(playbackItem)
+                                        } else {
+                                            val err = res.exceptionOrNull()?.message ?: "Torrent not instant-cached on PikPak. Tap card for P2P."
+                                            android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_SHORT).show()
                                         }
+                                    } catch (e: Exception) {
+                                        android.widget.Toast.makeText(context, "Error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
                                     } finally {
                                         resolvingStreamKey = null
                                     }
                                 }
                             }
+
+                            val isUnder6Gb = torr.fileSizeMb <= 6000.0
+                            val isSavedInWatchlist = watchlist.any { it.id == streamKey || (torr.infoHash != null && it.infoHash == torr.infoHash) }
 
                             Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 5.dp)) {
                                 StreamCard(
@@ -786,9 +999,36 @@ fun DetailScreen(
                                             torrentEngine.startStreaming(hash, torr.title ?: torr.name ?: "Torrent Stream")
                                         }
                                     },
-                                    onMagnetStream = {
-                                        resolveAndPlay(restartFromBeginning = false)
+                                    onMagnetStream = if (isUnder6Gb) {
+                                        { resolveAndPlay(restartFromBeginning = false) }
+                                    } else null,
+                                    onWatchlistToggle = {
+                                        scope.launch {
+                                            if (isSavedInWatchlist) {
+                                                repository.removeFromWatchlist(streamKey)
+                                                torr.infoHash?.let { repository.removeFromWatchlist(it) }
+                                                android.widget.Toast.makeText(context, "Removed from Watchlist", android.widget.Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                val watchItem = com.mystream.app.data.model.WatchlistItem(
+                                                    id = streamKey,
+                                                    imdbId = detail.id,
+                                                    title = if (isSeries && selectedEpisode != null) "${detail.name} (S${selectedEpisode?.season}E${selectedEpisode?.episode})" else detail.name,
+                                                    subtitle = "${torr.quality} • ${torr.fileSize ?: ""}".trim().removeSuffix("•").trim(),
+                                                    posterUrl = selectedEpisode?.thumbnail ?: detail.poster,
+                                                    backdropUrl = detail.background,
+                                                    type = detail.type,
+                                                    seasonNumber = selectedEpisode?.season ?: 0,
+                                                    episodeNumber = selectedEpisode?.episode ?: 0,
+                                                    infoHash = torr.infoHash,
+                                                    torrentTitle = torr.title ?: torr.name,
+                                                    torrentQuality = torr.quality
+                                                )
+                                                repository.addToWatchlist(watchItem)
+                                                android.widget.Toast.makeText(context, "Added to Watchlist!", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
                                     },
+                                    isSavedToWatchlist = isSavedInWatchlist,
                                     actionButtonText = "☁ Direct"
                                 )
                             }
@@ -913,31 +1153,28 @@ fun DetailScreen(
 }
 
 @Composable
-private fun EpisodeCardItem(
+private fun EpisodeHorizontalCardItem(
     episode: StremioVideoEpisode,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
     val bgColor = if (isSelected) PrimaryNeon.copy(alpha = 0.2f) else SurfaceCard
-    val borderModifier = if (isSelected) {
-        Modifier.background(PrimaryNeon.copy(alpha = 0.15f))
-    } else Modifier
+    val borderColor = if (isSelected) PrimaryNeon else Color(0x22FFFFFF)
 
-    Row(
+    Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 5.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .width(145.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(bgColor)
+            .border(if (isSelected) 1.8.dp else 1.dp, borderColor, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(6.dp)
     ) {
         Box(
             modifier = Modifier
-                .width(100.dp)
+                .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(7.dp))
                 .background(SurfaceDark)
         ) {
             if (!episode.thumbnail.isNullOrBlank()) {
@@ -957,31 +1194,53 @@ private fun EpisodeCardItem(
                     )
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            val epTitle = episode.name?.takeIf { it.isNotBlank() } ?: "Episode ${episode.episode}"
-            Text(
-                text = "E${episode.episode}: $epTitle",
-                color = if (isSelected) PrimaryNeon else TextPrimary,
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            if (!episode.overview.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
+            // Episode Number Badge
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (isSelected) PrimaryNeon else Color(0xCC000000))
+                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
+            ) {
                 Text(
-                    text = episode.overview,
-                    color = TextMuted,
-                    fontSize = 11.5.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    text = "EP ${episode.episode}",
+                    color = if (isSelected) Color.Black else Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.ExtraBold
                 )
             }
+
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(PrimaryNeon.copy(alpha = 0.85f))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "▶ READY",
+                        color = Color.Black,
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        val epTitle = episode.name?.takeIf { it.isNotBlank() } ?: "Episode ${episode.episode}"
+        Text(
+            text = epTitle,
+            color = if (isSelected) PrimaryNeon else TextPrimary,
+            fontSize = 11.5.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
