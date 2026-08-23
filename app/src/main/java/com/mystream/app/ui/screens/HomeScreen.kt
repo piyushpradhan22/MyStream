@@ -282,16 +282,15 @@ fun HomeScreen(
                     }
 
                     // Floating App Bar at Top
-                    Row(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .statusBarsPadding()
                             .padding(horizontal = 20.dp)
-                            .padding(top = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(top = 16.dp)
                     ) {
                         Row(
+                            modifier = Modifier.align(Alignment.CenterStart),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
@@ -317,7 +316,19 @@ fun HomeScreen(
                             )
                         }
 
+                        IconButton(
+                            onClick = onNavigateToSearch,
+                            modifier = Modifier.align(Alignment.Center)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = TextSecondary
+                            )
+                        }
+
                         Row(
+                            modifier = Modifier.align(Alignment.CenterEnd),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
@@ -326,14 +337,6 @@ fun HomeScreen(
                                     imageVector = Icons.Default.AddLink,
                                     contentDescription = "Play Custom URL / Magnet",
                                     tint = PrimaryNeon
-                                )
-                            }
-
-                            IconButton(onClick = onNavigateToSearch) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "Search",
-                                    tint = TextSecondary
                                 )
                             }
 

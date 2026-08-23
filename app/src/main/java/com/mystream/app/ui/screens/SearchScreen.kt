@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -45,6 +47,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -52,22 +56,13 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.key.utf16CodePoint
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.content.Context
-import android.view.inputmethod.InputMethodManager
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import com.mystream.app.data.model.StremioMetaPreview
 import com.mystream.app.data.repository.SourcesRepository
 import com.mystream.app.ui.components.PosterCard
@@ -78,53 +73,67 @@ import com.mystream.app.ui.theme.SurfaceDark
 import com.mystream.app.ui.theme.TextMuted
 import com.mystream.app.ui.theme.TextPrimary
 import com.mystream.app.ui.theme.TextSecondary
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun SearchScreen(
     repository: SourcesRepository,
     onBack: () -> Unit,
     onNavigateToDetail: (type: String, id: String) -> Unit,
-    // Pre-populated query from Google Assistant voice search or launcher shortcut
     initialQuery: String = ""
 ) {
     var query by remember { mutableStateOf(initialQuery) }
     var rawResults by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
     var trendingItems by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var selectedFilter by remember { mutableStateOf("All") } // "All", "Movies", "Series"
+    var selectedFilter by remember { mutableStateOf("All") }
     var isSearching by remember { mutableStateOf(false) }
+    var isSearchEditing by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
     var searchJob by remember { mutableStateOf<Job?>(null) }
     val searchFocusRequester = remember { FocusRequester() }
+    var isSearchFieldFocused by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
-    val context = LocalContext.current
-    val view = LocalView.current
-    val imm = remember { context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager }
+    val density = LocalDensity.current
+    val isImeVisible = WindowInsets.ime.getBottom(density) > 0
+    val isEditing = isImeVisible || isSearchEditing
 
-    fun showOnScreenKeyboard() {
-        searchFocusRequester.requestFocus()
-        keyboardController?.show()
-        try {
-            imm?.showSoftInput(view, InputMethodManager.SHOW_FORCED)
-        } catch (_: Exception) {}
+    fun enterSearchEditingMode() {
+        isSearchEditing = true
+        scope.launch {
+            repeat(3) {
+                if (!isSearchFieldFocused) {
+                    searchFocusRequester.requestFocus()
+                }
+                delay(40)
+            }
+        }
     }
 
-    // Automatically focus search area upon opening Search screen
+    LaunchedEffect(isImeVisible) {
+        if (!isImeVisible) {
+            isSearchEditing = false
+        }
+    }
+
     LaunchedEffect(Unit) {
         delay(120)
         try {
             searchFocusRequester.requestFocus()
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
     }
 
-    // Load trending suggestions for empty state
     LaunchedEffect(Unit) {
         try {
             val movies = repository.fetchCatalog("movie", "top", skip = 0).metas
             val series = repository.fetchCatalog("series", "top", skip = 0).metas
             trendingItems = (movies + series).distinctBy { it.id }
-        } catch (e: Exception) {
-            // ignore
+        } catch (_: Exception) {
         }
     }
 
@@ -139,7 +148,7 @@ fun SearchScreen(
 
         isSearching = true
         searchJob = scope.launch {
-            delay(250) // fast debounce
+            delay(250)
             try {
                 coroutineScope {
                     val movieDeferred = async {
@@ -152,7 +161,7 @@ fun SearchScreen(
                     val seriesResults = seriesDeferred.await()
                     rawResults = (movieResults + seriesResults).distinctBy { it.id }
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 rawResults = emptyList()
             } finally {
                 isSearching = false
@@ -160,11 +169,9 @@ fun SearchScreen(
         }
     }
 
-    // If launched with a pre-filled voice-search query (e.g. "Hey Google, play X on MyStream"),
-    // trigger search automatically once the composable is ready
     LaunchedEffect(initialQuery) {
         if (initialQuery.isNotBlank()) {
-            delay(150) // allow composable to settle
+            delay(150)
             performSearch(initialQuery)
         }
     }
@@ -189,7 +196,6 @@ fun SearchScreen(
                 .padding(horizontal = 16.dp)
                 .padding(top = 16.dp, bottom = 12.dp)
         ) {
-            // Search Bar Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -202,6 +208,7 @@ fun SearchScreen(
                     onClick = onBack,
                     interactionSource = backInteraction,
                     modifier = Modifier
+                        .focusProperties { canFocus = !isEditing }
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (isBackFocused) FocusRingOrange.copy(alpha = 0.25f) else Color.Transparent)
                         .border(
@@ -219,6 +226,12 @@ fun SearchScreen(
 
                 val searchInteractionSource = remember { MutableInteractionSource() }
                 val isSearchFocused by searchInteractionSource.collectIsFocusedAsState()
+
+                LaunchedEffect(isSearchFieldFocused, isSearchEditing) {
+                    if (isSearchFieldFocused && isSearchEditing) {
+                        keyboardController?.show()
+                    }
+                }
 
                 OutlinedTextField(
                     value = query,
@@ -259,6 +272,7 @@ fun SearchScreen(
                     keyboardActions = KeyboardActions(
                         onSearch = {
                             performSearch(query)
+                            isSearchEditing = false
                             keyboardController?.hide()
                         }
                     ),
@@ -273,49 +287,30 @@ fun SearchScreen(
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(searchFocusRequester)
+                        .onFocusChanged { isSearchFieldFocused = it.isFocused }
                         .onPreviewKeyEvent { keyEvent ->
                             if (keyEvent.type == KeyEventType.KeyDown) {
                                 when (keyEvent.key) {
                                     Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                                        showOnScreenKeyboard()
-                                        false
-                                    }
-                                    Key.Backspace -> {
-                                        if (query.isNotEmpty()) {
-                                            val updated = query.dropLast(1)
-                                            query = updated
-                                            performSearch(updated)
-                                            true
-                                        } else false
-                                    }
-                                    Key.Spacebar -> {
-                                        val updated = "$query "
-                                        query = updated
-                                        performSearch(updated)
+                                        enterSearchEditingMode()
                                         true
                                     }
-                                    else -> {
-                                        val unicode = keyEvent.utf16CodePoint
-                                        if (unicode in 32..126) {
-                                            val char = unicode.toChar()
-                                            val updated = "$query$char"
-                                            query = updated
-                                            performSearch(updated)
-                                            true
-                                        } else false
+
+                                    Key.Back -> {
+                                        isSearchEditing = false
+                                        keyboardController?.hide()
+                                        false
                                     }
+
+                                    else -> false
                                 }
                             } else false
-                        }
-                        .clickable(interactionSource = searchInteractionSource, indication = null) {
-                            showOnScreenKeyboard()
                         }
                 )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Filter Chips (All / Movies / Series)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -328,6 +323,7 @@ fun SearchScreen(
 
                     Box(
                         modifier = Modifier
+                            .focusProperties { canFocus = !isEditing }
                             .clip(RoundedCornerShape(20.dp))
                             .background(
                                 if (isChipFocused) FocusRingOrange.copy(alpha = 0.25f)
@@ -387,7 +383,6 @@ fun SearchScreen(
                     }
                 }
             } else if (query.isBlank()) {
-                // Empty query -> show Popular & Trending items
                 Column(modifier = Modifier.fillMaxSize()) {
                     Text(
                         text = "Popular & Trending",
@@ -407,6 +402,7 @@ fun SearchScreen(
                         items(trendingItems, key = { it.id }) { item ->
                             PosterCard(
                                 item = item,
+                                modifier = Modifier.focusProperties { canFocus = !isEditing },
                                 width = 110,
                                 onClick = { onNavigateToDetail(item.type, item.id) }
                             )
@@ -424,6 +420,7 @@ fun SearchScreen(
                     items(displayedResults, key = { it.id }) { item ->
                         PosterCard(
                             item = item,
+                            modifier = Modifier.focusProperties { canFocus = !isEditing },
                             width = 110,
                             onClick = { onNavigateToDetail(item.type, item.id) }
                         )
