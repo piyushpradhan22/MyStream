@@ -11,13 +11,48 @@ import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.net.InetAddress
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import okhttp3.Dns
+
+object SystemFallbackDns : Dns {
+    override fun lookup(hostname: String): List<InetAddress> {
+        return try {
+            Dns.SYSTEM.lookup(hostname)
+        } catch (e: Exception) {
+            try {
+                val req = Request.Builder()
+                    .url("https://1.1.1.1/dns-query?name=$hostname&type=A")
+                    .header("Accept", "application/dns-json")
+                    .build()
+                val rawClient = OkHttpClient.Builder()
+                    .connectTimeout(3, TimeUnit.SECONDS)
+                    .readTimeout(3, TimeUnit.SECONDS)
+                    .build()
+                rawClient.newCall(req).execute().use { res ->
+                    if (res.isSuccessful) {
+                        val body = res.body?.string() ?: ""
+                        val regex = """"data"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)"""".toRegex()
+                        val ips = regex.findAll(body).map { it.groupValues[1] }.toList()
+                        if (ips.isNotEmpty()) {
+                            return ips.map { InetAddress.getByAddress(hostname, InetAddress.getByName(it).address) }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+            throw e
+        }
+    }
+}
 
 class StremioApiClient(
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .dns(SystemFallbackDns)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .build()
 ) {
     private val json = Json {
@@ -28,19 +63,29 @@ class StremioApiClient(
     }
 
     private suspend fun getRaw(url: String, customHeaders: Map<String, String>? = null): String = withContext(Dispatchers.IO) {
+        android.util.Log.d("StremioApiClient", "Fetching URL: $url")
         val requestBuilder = Request.Builder()
             .url(url)
             .header("User-Agent", "MyStream/1.0 (Android; ExoPlayer)")
+            .header("Accept", "application/json")
 
         customHeaders?.forEach { (k, v) ->
             requestBuilder.header(k, v)
         }
 
-        client.newCall(requestBuilder.build()).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("HTTP error code: ${response.code} for URL: $url")
+        try {
+            client.newCall(requestBuilder.build()).execute().use { response ->
+                if (!response.isSuccessful) {
+                    android.util.Log.e("StremioApiClient", "HTTP ${response.code} for $url")
+                    throw IOException("HTTP error code: ${response.code} for URL: $url")
+                }
+                val body = response.body?.string() ?: throw IOException("Empty response body for URL: $url")
+                android.util.Log.d("StremioApiClient", "Successfully fetched ${body.length} chars from $url")
+                body
             }
-            response.body?.string() ?: throw IOException("Empty response body for URL: $url")
+        } catch (e: Exception) {
+            android.util.Log.e("StremioApiClient", "Network exception fetching $url", e)
+            throw e
         }
     }
 
@@ -60,8 +105,8 @@ class StremioApiClient(
         customHeaders: Map<String, String>? = null
     ): StremioCatalogResponse = withContext(Dispatchers.IO) {
         val root = baseUrl.removeSuffix("/manifest.json").removeSuffix("/")
-        val extraParts = mutableListOf<String>()
 
+        val extraParts = mutableListOf<String>()
         if (!genre.isNullOrBlank()) {
             extraParts.add("genre=${URLEncoder.encode(genre, "UTF-8")}")
         }

@@ -27,13 +27,22 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.IOException
 
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+
 class PikPakStreamResolver(
     private val context: Context,
     private val pikpakClient: PikPakApiClient = PikPakApiClient(),
     private val stremioClient: StremioApiClient = StremioApiClient()
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true; prettyPrint = true }
-    private val configFile: File get() = File(context.filesDir, "mystream_config.json")
+    private val encConfigFile: File get() = File(context.filesDir, "mystream_config.enc")
+    private val legacyConfigFile: File get() = File(context.filesDir, "mystream_config.json")
 
     private var cachedPostgresUsernames: List<String> = emptyList()
 
@@ -41,8 +50,75 @@ class PikPakStreamResolver(
         private const val TAG = "MyStream_Resolver"
     }
 
+    private object EncryptedConfigStore {
+        private const val KEY_ALIAS = "MyStream_Config_Master_Key"
+        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        private const val TRANSFORMATION = "AES/GCM/NoPadding"
+        private const val IV_SIZE = 12
+        private const val TAG_SIZE = 128
+
+        @Synchronized
+        private fun getSecretKey(): SecretKey {
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+            if (!keyStore.containsAlias(KEY_ALIAS)) {
+                val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+                val spec = KeyGenParameterSpec.Builder(
+                    KEY_ALIAS,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                )
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(256)
+                    .build()
+                keyGenerator.init(spec)
+                return keyGenerator.generateKey()
+            }
+            return (keyStore.getEntry(KEY_ALIAS, null) as KeyStore.SecretKeyEntry).secretKey
+        }
+
+        fun encrypt(plainText: String): ByteArray {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            val key = getSecretKey()
+            cipher.init(Cipher.ENCRYPT_MODE, key)
+            val iv = cipher.iv
+            val cipherText = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
+            return iv + cipherText
+        }
+
+        fun decrypt(encryptedBytes: ByteArray): String {
+            if (encryptedBytes.size < IV_SIZE) return ""
+            val iv = encryptedBytes.copyOfRange(0, IV_SIZE)
+            val cipherText = encryptedBytes.copyOfRange(IV_SIZE, encryptedBytes.size)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            val key = getSecretKey()
+            val spec = GCMParameterSpec(TAG_SIZE, iv)
+            cipher.init(Cipher.DECRYPT_MODE, key, spec)
+            val plainTextBytes = cipher.doFinal(cipherText)
+            return String(plainTextBytes, Charsets.UTF_8)
+        }
+    }
+
     fun loadConfig(): AppJsonConfig {
         return try {
+            // 1. Try reading encrypted config
+            if (encConfigFile.exists()) {
+                val cipherBytes = encConfigFile.readBytes()
+                val decryptedJson = EncryptedConfigStore.decrypt(cipherBytes)
+                if (decryptedJson.isNotBlank()) {
+                    return json.decodeFromString<AppJsonConfig>(decryptedJson)
+                }
+            }
+
+            // 2. Try migrating legacy plaintext config
+            if (legacyConfigFile.exists()) {
+                val text = legacyConfigFile.readText()
+                val parsed = json.decodeFromString<AppJsonConfig>(text)
+                saveConfig(parsed)
+                try { legacyConfigFile.delete() } catch (_: Exception) {}
+                return parsed
+            }
+
+            // 3. Fallback to bundled asset
             val assetConfig = try {
                 val assetJson = context.assets.open("mystream_config.json").bufferedReader().use { it.readText() }
                 json.decodeFromString<AppJsonConfig>(assetJson)
@@ -50,13 +126,8 @@ class PikPakStreamResolver(
                 AppJsonConfig()
             }
 
-            if (configFile.exists()) {
-                val text = configFile.readText()
-                json.decodeFromString<AppJsonConfig>(text)
-            } else {
-                saveConfig(assetConfig)
-                assetConfig
-            }
+            saveConfig(assetConfig)
+            assetConfig
         } catch (e: Exception) {
             AppJsonConfig()
         }
@@ -65,9 +136,11 @@ class PikPakStreamResolver(
     fun saveConfig(config: AppJsonConfig) {
         try {
             val text = json.encodeToString(config)
-            configFile.writeText(text)
+            val cipherBytes = EncryptedConfigStore.encrypt(text)
+            encConfigFile.writeBytes(cipherBytes)
+            try { if (legacyConfigFile.exists()) legacyConfigFile.delete() } catch (_: Exception) {}
         } catch (e: Exception) {
-            // ignore
+            Log.e(TAG, "Failed to save encrypted config", e)
         }
     }
 
@@ -201,16 +274,15 @@ class PikPakStreamResolver(
         val mutex = Mutex()
         val resolvedQualities = mutableSetOf<String>()
 
-        // 2. Compare against DB pikpak_torrents and pikpak_v2
-        if (postgresUrl.isNotBlank()) {
-            val dbInfoHashes = dataTorrents.map { it.infoHash }.toSet()
+        // 2. Check and reuse cached records in pikpak_v2
+        if (postgresUrl.isNotBlank() && dataV2.isNotEmpty()) {
+            val validCachedRecords = dataV2.filter { rec ->
+                rec.infoHash.isBlank() || currentInfoHashes.contains(rec.infoHash)
+            }
 
-            val hasSameTorrentCount = dataTorrents.isNotEmpty() && dataTorrents.size == currentTorrents.size
-            val hasIdenticalTorrents = hasSameTorrentCount && dbInfoHashes == currentInfoHashes
-
-            if (dataV2.isNotEmpty() && hasIdenticalTorrents) {
-                Log.i(TAG, "⚡ Checking ${dataV2.size} cached DB records...")
-                val cachedJobs = dataV2.map { record ->
+            if (validCachedRecords.isNotEmpty()) {
+                Log.i(TAG, "⚡ Checking ${validCachedRecords.size} cached DB records...")
+                val cachedJobs = validCachedRecords.map { record ->
                     launch(Dispatchers.IO) {
                         var token = record.accessToken
                         val now = System.currentTimeMillis() / 1000.0
@@ -244,13 +316,6 @@ class PikPakStreamResolver(
                 // If all 4 qualities were resolved from cache, complete flow
                 if (accumulatedStreams.size >= 4) {
                     return@channelFlow
-                }
-            }
-
-            if (dataV2.isNotEmpty() && !hasIdenticalTorrents) {
-                Log.i(TAG, "🔄 Detected new/changed torrents. Clearing stale records...")
-                launch(Dispatchers.IO) {
-                    PostgresAccountFetcher.clearPikpakV2Record(postgresUrl, id)
                 }
             }
         }

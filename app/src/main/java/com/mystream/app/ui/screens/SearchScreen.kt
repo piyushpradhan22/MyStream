@@ -3,6 +3,9 @@ package com.mystream.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,12 +18,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
@@ -41,25 +44,40 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mystream.app.data.model.StremioMetaPreview
-import com.mystream.app.data.repository.SourcesRepository
-import com.mystream.app.ui.components.PosterCard
-import com.mystream.app.ui.theme.BgDark
-import com.mystream.app.ui.theme.PrimaryNeon
-import com.mystream.app.ui.theme.SecondaryCyan
-import com.mystream.app.ui.theme.SurfaceDark
-import com.mystream.app.ui.theme.TextMuted
-import com.mystream.app.ui.theme.TextPrimary
-import com.mystream.app.ui.theme.TextSecondary
+import android.content.Context
+import android.view.inputmethod.InputMethodManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.mystream.app.data.model.StremioMetaPreview
+import com.mystream.app.data.repository.SourcesRepository
+import com.mystream.app.ui.components.PosterCard
+import com.mystream.app.ui.theme.BgDark
+import com.mystream.app.ui.theme.FocusRingOrange
+import com.mystream.app.ui.theme.PrimaryNeon
+import com.mystream.app.ui.theme.SurfaceDark
+import com.mystream.app.ui.theme.TextMuted
+import com.mystream.app.ui.theme.TextPrimary
+import com.mystream.app.ui.theme.TextSecondary
 
 @Composable
 fun SearchScreen(
@@ -75,6 +93,27 @@ fun SearchScreen(
 
     val scope = rememberCoroutineScope()
     var searchJob by remember { mutableStateOf<Job?>(null) }
+    val searchFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
+    val view = LocalView.current
+    val imm = remember { context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager }
+
+    fun showOnScreenKeyboard() {
+        searchFocusRequester.requestFocus()
+        keyboardController?.show()
+        try {
+            imm?.showSoftInput(view, InputMethodManager.SHOW_FORCED)
+        } catch (_: Exception) {}
+    }
+
+    // Automatically focus search area upon opening Search screen
+    LaunchedEffect(Unit) {
+        delay(120)
+        try {
+            searchFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
 
     // Load trending suggestions for empty state
     LaunchedEffect(Unit) {
@@ -89,7 +128,8 @@ fun SearchScreen(
 
     fun performSearch(text: String) {
         searchJob?.cancel()
-        if (text.isBlank()) {
+        val clean = text.trim()
+        if (clean.isBlank()) {
             rawResults = emptyList()
             isSearching = false
             return
@@ -97,14 +137,14 @@ fun SearchScreen(
 
         isSearching = true
         searchJob = scope.launch {
-            delay(300) // fast debounce
+            delay(250) // fast debounce
             try {
                 coroutineScope {
                     val movieDeferred = async {
-                        repository.fetchCatalog("movie", "top", search = text).metas
+                        repository.fetchCatalog("movie", "top", search = clean).metas
                     }
                     val seriesDeferred = async {
-                        repository.fetchCatalog("series", "top", search = text).metas
+                        repository.fetchCatalog("series", "top", search = clean).metas
                     }
                     val movieResults = movieDeferred.await()
                     val seriesResults = seriesDeferred.await()
@@ -135,8 +175,8 @@ fun SearchScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(horizontal = 14.dp)
-                .padding(top = 18.dp, bottom = 12.dp)
+                .padding(horizontal = 16.dp)
+                .padding(top = 16.dp, bottom = 12.dp)
         ) {
             // Search Bar Header
             Row(
@@ -144,13 +184,30 @@ fun SearchScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                IconButton(onClick = onBack) {
+                val backInteraction = remember { MutableInteractionSource() }
+                val isBackFocused by backInteraction.collectIsFocusedAsState()
+
+                IconButton(
+                    onClick = onBack,
+                    interactionSource = backInteraction,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isBackFocused) FocusRingOrange.copy(alpha = 0.25f) else Color.Transparent)
+                        .border(
+                            if (isBackFocused) 2.dp else 0.dp,
+                            if (isBackFocused) FocusRingOrange else Color.Transparent,
+                            RoundedCornerShape(8.dp)
+                        )
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        tint = TextPrimary
+                        tint = if (isBackFocused) FocusRingOrange else TextPrimary
                     )
                 }
+
+                val searchInteractionSource = remember { MutableInteractionSource() }
+                val isSearchFocused by searchInteractionSource.collectIsFocusedAsState()
 
                 OutlinedTextField(
                     value = query,
@@ -163,7 +220,7 @@ fun SearchScreen(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = null,
-                            tint = if (query.isNotEmpty()) PrimaryNeon else TextSecondary
+                            tint = if (isSearchFocused || query.isNotEmpty()) FocusRingOrange else TextSecondary
                         )
                     },
                     trailingIcon = {
@@ -171,6 +228,7 @@ fun SearchScreen(
                             IconButton(onClick = {
                                 query = ""
                                 rawResults = emptyList()
+                                searchFocusRequester.requestFocus()
                             }) {
                                 Icon(
                                     imageVector = Icons.Default.Clear,
@@ -182,15 +240,65 @@ fun SearchScreen(
                     },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
+                    interactionSource = searchInteractionSource,
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Search,
+                        keyboardType = KeyboardType.Text
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            performSearch(query)
+                            keyboardController?.hide()
+                        }
+                    ),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = SurfaceDark,
                         unfocusedContainerColor = SurfaceDark,
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = PrimaryNeon,
-                        unfocusedBorderColor = TextMuted.copy(alpha = 0.5f)
+                        focusedBorderColor = FocusRingOrange,
+                        unfocusedBorderColor = Color(0x33FFFFFF)
                     ),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(searchFocusRequester)
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                when (keyEvent.key) {
+                                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                        showOnScreenKeyboard()
+                                        false
+                                    }
+                                    Key.Backspace -> {
+                                        if (query.isNotEmpty()) {
+                                            val updated = query.dropLast(1)
+                                            query = updated
+                                            performSearch(updated)
+                                            true
+                                        } else false
+                                    }
+                                    Key.Spacebar -> {
+                                        val updated = "$query "
+                                        query = updated
+                                        performSearch(updated)
+                                        true
+                                    }
+                                    else -> {
+                                        val unicode = keyEvent.utf16CodePoint
+                                        if (unicode in 32..126) {
+                                            val char = unicode.toChar()
+                                            val updated = "$query$char"
+                                            query = updated
+                                            performSearch(updated)
+                                            true
+                                        } else false
+                                    }
+                                }
+                            } else false
+                        }
+                        .clickable(interactionSource = searchInteractionSource, indication = null) {
+                            showOnScreenKeyboard()
+                        }
                 )
             }
 
@@ -204,23 +312,35 @@ fun SearchScreen(
             ) {
                 listOf("All", "Movies", "Series").forEach { filter ->
                     val isSelected = selectedFilter == filter
+                    val chipInteraction = remember { MutableInteractionSource() }
+                    val isChipFocused by chipInteraction.collectIsFocusedAsState()
+
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
-                            .background(if (isSelected) PrimaryNeon else SurfaceDark)
-                            .border(
-                                1.dp,
-                                if (isSelected) PrimaryNeon else Color(0x22FFFFFF),
-                                RoundedCornerShape(20.dp)
+                            .background(
+                                if (isChipFocused) FocusRingOrange.copy(alpha = 0.25f)
+                                else if (isSelected) PrimaryNeon.copy(alpha = 0.25f)
+                                else SurfaceDark
                             )
-                            .clickable { selectedFilter = filter }
+                            .border(
+                                width = if (isChipFocused) 2.5.dp else 1.dp,
+                                color = if (isChipFocused) FocusRingOrange
+                                else if (isSelected) PrimaryNeon
+                                else Color(0x22FFFFFF),
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                            .focusable(interactionSource = chipInteraction)
+                            .clickable(interactionSource = chipInteraction, indication = null) {
+                                selectedFilter = filter
+                            }
                             .padding(horizontal = 14.dp, vertical = 6.dp)
                     ) {
                         Text(
                             text = filter,
-                            color = if (isSelected) Color.Black else TextSecondary,
+                            color = if (isChipFocused) FocusRingOrange else if (isSelected) TextPrimary else TextSecondary,
                             fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            fontWeight = if (isSelected || isChipFocused) FontWeight.Bold else FontWeight.Normal
                         )
                     }
                 }

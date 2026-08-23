@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mystream.app.data.model.StremioStreamSource
 import com.mystream.app.ui.theme.AccentAmber
+import com.mystream.app.ui.theme.FocusRingOrange
 import com.mystream.app.ui.theme.PrimaryNeon
 import com.mystream.app.ui.theme.SecondaryCyan
 import com.mystream.app.ui.theme.SurfaceCard
@@ -59,30 +60,29 @@ import com.mystream.app.ui.theme.TextSecondary
 @Composable
 fun StreamCard(
     stream: StremioStreamSource,
+    isResolving: Boolean = false,
+    externalFocusRequester: FocusRequester? = null,
     onClick: () -> Unit,
     onRestart: (() -> Unit)? = null,
     onMagnetStream: (() -> Unit)? = null,
     onWatchlistToggle: (() -> Unit)? = null,
     isSavedToWatchlist: Boolean = false,
-    actionButtonText: String = "🧲 P2P",
-    modifier: Modifier = Modifier,
-    isResolving: Boolean = false
+    actionButtonText: String = "⚡ Resolve",
+    modifier: Modifier = Modifier
 ) {
-    val cardFocusRequester = remember { FocusRequester() }
-    val restartFocusRequester = remember { FocusRequester() }
+    val cardFocusRequester = externalFocusRequester ?: remember { FocusRequester() }
     val magnetFocusRequester = remember { FocusRequester() }
+    val restartFocusRequester = remember { FocusRequester() }
     val watchlistFocusRequester = remember { FocusRequester() }
 
     val cardInteractionSource = remember { MutableInteractionSource() }
-    val isCardFocused by cardInteractionSource.collectIsFocusedAsState()
-
     val restartInteractionSource = remember { MutableInteractionSource() }
-    val isRestartFocused by restartInteractionSource.collectIsFocusedAsState()
-
     val magnetInteractionSource = remember { MutableInteractionSource() }
-    val isMagnetFocused by magnetInteractionSource.collectIsFocusedAsState()
-
     val watchlistInteractionSource = remember { MutableInteractionSource() }
+
+    val isCardFocused by cardInteractionSource.collectIsFocusedAsState()
+    val isRestartFocused by restartInteractionSource.collectIsFocusedAsState()
+    val isMagnetFocused by magnetInteractionSource.collectIsFocusedAsState()
     val isWatchlistFocused by watchlistInteractionSource.collectIsFocusedAsState()
 
     var hasSeedFocus by remember { mutableStateOf(false) }
@@ -95,8 +95,8 @@ fun StreamCard(
 
     val shouldMarquee = isCardFocused
 
-    val borderColor = if (isCardFocused) PrimaryNeon else Color(0x22FFFFFF)
-    val bgColor = if (isCardFocused) PrimaryNeon.copy(alpha = 0.15f) else SurfaceCard
+    val borderColor = if (isCardFocused) FocusRingOrange else Color(0x22FFFFFF)
+    val bgColor = if (isCardFocused) FocusRingOrange.copy(alpha = 0.12f) else SurfaceCard
 
     // Extract Torrent Name and File Name properly from title lines
     val titleLines = stream.title?.lines()?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
@@ -271,7 +271,7 @@ fun StreamCard(
                                 .background(if (isMagnetFocused) AccentAmber.copy(alpha = 0.35f) else AccentAmber.copy(alpha = 0.2f))
                                 .border(
                                     if (isMagnetFocused) 2.dp else 1.dp,
-                                    if (isMagnetFocused) AccentAmber else AccentAmber.copy(alpha = 0.5f),
+                                    if (isMagnetFocused) FocusRingOrange else AccentAmber.copy(alpha = 0.5f),
                                     RoundedCornerShape(6.dp)
                                 )
                                 .clickable(interactionSource = magnetInteractionSource, indication = null) { onMagnetStream() }
@@ -280,7 +280,7 @@ fun StreamCard(
                         ) {
                             Text(
                                 text = actionButtonText,
-                                color = AccentAmber,
+                                color = if (isMagnetFocused) FocusRingOrange else AccentAmber,
                                 fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -294,10 +294,10 @@ fun StreamCard(
                                 .focusRequester(watchlistFocusRequester)
                                 .size(30.dp)
                                 .clip(CircleShape)
-                                .background(if (isWatchlistFocused) SecondaryCyan.copy(alpha = 0.25f) else SurfaceDark)
+                                .background(if (isWatchlistFocused) FocusRingOrange.copy(alpha = 0.25f) else SurfaceDark)
                                 .border(
                                     if (isWatchlistFocused) 2.dp else 1.dp,
-                                    if (isSavedToWatchlist) SecondaryCyan else Color(0x33FFFFFF),
+                                    if (isWatchlistFocused) FocusRingOrange else if (isSavedToWatchlist) SecondaryCyan else Color(0x33FFFFFF),
                                     CircleShape
                                 )
                                 .focusable(interactionSource = watchlistInteractionSource)
@@ -311,7 +311,7 @@ fun StreamCard(
                             Icon(
                                 imageVector = if (isSavedToWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                                 contentDescription = "Toggle Watchlist",
-                                tint = if (isSavedToWatchlist) SecondaryCyan else TextMuted,
+                                tint = if (isWatchlistFocused) FocusRingOrange else if (isSavedToWatchlist) SecondaryCyan else TextMuted,
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -319,7 +319,7 @@ fun StreamCard(
 
                     if (isResolving) {
                         CircularProgressIndicator(
-                            color = PrimaryNeon,
+                            color = FocusRingOrange,
                             modifier = Modifier.size(20.dp),
                             strokeWidth = 2.dp
                         )
@@ -329,10 +329,10 @@ fun StreamCard(
                                 .focusRequester(restartFocusRequester)
                                 .size(32.dp)
                                 .clip(CircleShape)
-                                .background(if (isRestartFocused) PrimaryNeon.copy(alpha = 0.25f) else SurfaceDark)
+                                .background(if (isRestartFocused) FocusRingOrange.copy(alpha = 0.25f) else SurfaceDark)
                                 .border(
                                     if (isRestartFocused) 2.dp else 1.dp,
-                                    if (isRestartFocused) PrimaryNeon else Color(0x33FFFFFF),
+                                    if (isRestartFocused) FocusRingOrange else Color(0x33FFFFFF),
                                     CircleShape
                                 )
                                 .focusable(interactionSource = restartInteractionSource)
@@ -373,7 +373,7 @@ fun StreamCard(
                             Icon(
                                 imageVector = Icons.Default.Replay,
                                 contentDescription = "Restart from Beginning",
-                                tint = if (isRestartFocused) PrimaryNeon else TextSecondary,
+                                tint = if (isRestartFocused) FocusRingOrange else TextSecondary,
                                 modifier = Modifier.size(17.dp)
                             )
                         }
@@ -386,7 +386,7 @@ fun StreamCard(
             // Line 1: Torrent / Release Name (Marquee only when focused/selected)
             Text(
                 text = torrentName,
-                color = if (isCardFocused) PrimaryNeon else TextPrimary,
+                color = if (isCardFocused) FocusRingOrange else TextPrimary,
                 fontSize = 13.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,

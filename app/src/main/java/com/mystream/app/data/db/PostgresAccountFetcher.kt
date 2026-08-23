@@ -7,8 +7,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import com.mystream.app.data.api.SystemFallbackDns
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.net.InetAddress
 import java.net.Socket
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -79,7 +81,12 @@ object PostgresAccountFetcher {
 
     private fun executePgQuery(config: PgConnectionConfig, query: String): List<List<String>> {
         Log.d(TAG, "Connecting to PostgreSQL ${config.host}:${config.port}/${config.db}...")
-        val socket = Socket(config.host, config.port)
+        val address = try {
+            InetAddress.getByName(config.host)
+        } catch (e: Exception) {
+            SystemFallbackDns.lookup(config.host).firstOrNull() ?: throw e
+        }
+        val socket = Socket(address, config.port)
         socket.soTimeout = 12000
         var inStream = DataInputStream(socket.getInputStream())
         var outStream = DataOutputStream(socket.getOutputStream())

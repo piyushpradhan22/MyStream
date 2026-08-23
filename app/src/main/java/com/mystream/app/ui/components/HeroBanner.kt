@@ -42,18 +42,24 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.mystream.app.data.model.StremioMetaPreview
 import com.mystream.app.ui.theme.BgDark
+import com.mystream.app.ui.theme.FocusRingOrange
 import com.mystream.app.ui.theme.ImdbGold
 import com.mystream.app.ui.theme.PrimaryNeon
 import com.mystream.app.ui.theme.TextMuted
 import com.mystream.app.ui.theme.TextPrimary
 import com.mystream.app.ui.theme.TextSecondary
 
+import androidx.compose.foundation.border
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+
 @Composable
 fun HeroBanner(
     item: StremioMetaPreview,
     onPlayClick: () -> Unit,
-    onDetailsClick: () -> Unit,
     modifier: Modifier = Modifier,
+    playFocusRequester: FocusRequester? = null,
+    onDetailsClick: (() -> Unit)? = null,
     height: Int = 340
 ) {
     Box(
@@ -178,17 +184,27 @@ fun HeroBanner(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Action Buttons
+            val playInteractionSource = remember { MutableInteractionSource() }
+            val isPlayFocused by playInteractionSource.collectIsFocusedAsState()
+
+            // Action Button (Play / Watch Now)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Button(
                     onClick = onPlayClick,
+                    interactionSource = playInteractionSource,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = PrimaryNeon,
+                        containerColor = if (isPlayFocused) PrimaryNeon else PrimaryNeon.copy(alpha = 0.9f),
                         contentColor = TextPrimary
                     ),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .then(if (playFocusRequester != null) Modifier.focusRequester(playFocusRequester) else Modifier)
+                        .then(
+                            if (isPlayFocused) Modifier.border(2.5.dp, FocusRingOrange, RoundedCornerShape(10.dp))
+                            else Modifier
+                        )
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
@@ -199,26 +215,6 @@ fun HeroBanner(
                     Text(
                         text = "Play",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = onDetailsClick,
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = TextPrimary
-                    ),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "Details",
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Details",
-                        fontWeight = FontWeight.Medium,
                         fontSize = 14.sp
                     )
                 }

@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -66,6 +68,7 @@ import com.mystream.app.data.model.StremioVideoEpisode
 import com.mystream.app.data.repository.SourcesRepository
 import com.mystream.app.ui.components.StreamCard
 import com.mystream.app.ui.theme.BgDark
+import com.mystream.app.ui.theme.FocusRingOrange
 import com.mystream.app.ui.theme.ImdbGold
 import com.mystream.app.ui.theme.PrimaryNeon
 import com.mystream.app.ui.theme.SecondaryCyan
@@ -75,6 +78,17 @@ import com.mystream.app.ui.theme.TextMuted
 import com.mystream.app.ui.theme.TextPrimary
 import com.mystream.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
+
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 
 private fun formatTransferRate(bytesPerSec: Long): String {
     return when {
@@ -102,6 +116,17 @@ fun DetailScreen(
     var isResolvingMoreStreams by remember { mutableStateOf(false) }
     var resolvingStreamKey by remember { mutableStateOf<String?>(null) }
 
+    val availableTabFocusRequester = remember { FocusRequester() }
+    val allTorrentsTabFocusRequester = remember { FocusRequester() }
+    val firstStreamFocusRequester = remember { FocusRequester() }
+    val firstTorrentFocusRequester = remember { FocusRequester() }
+
+    val tab0InteractionSource = remember { MutableInteractionSource() }
+    val isTab0Focused by tab0InteractionSource.collectIsFocusedAsState()
+
+    val tab1InteractionSource = remember { MutableInteractionSource() }
+    val isTab1Focused by tab1InteractionSource.collectIsFocusedAsState()
+
     val context = androidx.compose.ui.platform.LocalContext.current
     val torrentEngine = remember { com.mystream.app.torrent.TorrentStreamEngine.getInstance(context) }
     val torrentStatus by torrentEngine.statusFlow.collectAsState()
@@ -114,7 +139,22 @@ fun DetailScreen(
     var selectedSeasonIndex by remember { mutableIntStateOf(0) }
     var selectedEpisode by remember { mutableStateOf<StremioVideoEpisode?>(null) }
 
+    val listState = rememberLazyListState()
+    val backButtonFocusRequester = remember { FocusRequester() }
+
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(metaDetail, isDetailLoading) {
+        if (!isDetailLoading && metaDetail != null) {
+            kotlinx.coroutines.delay(100)
+            try {
+                backButtonFocusRequester.requestFocus()
+                listState.scrollToItem(0, 0)
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
 
     fun loadStreams(queryId: String, forceRefresh: Boolean = false) {
         scope.launch {
@@ -210,6 +250,7 @@ fun DetailScreen(
             } else emptyList()
 
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 60.dp)
             ) {
@@ -246,19 +287,31 @@ fun DetailScreen(
                         )
 
                         // Top Back Button
-                        IconButton(
-                            onClick = onBack,
+                        val backInteraction = remember { MutableInteractionSource() }
+                        val isBackFocused by backInteraction.collectIsFocusedAsState()
+
+                        Box(
                             modifier = Modifier
                                 .statusBarsPadding()
                                 .padding(top = 18.dp, start = 16.dp)
                                 .align(Alignment.TopStart)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0x66000000))
+                                .background(if (isBackFocused) FocusRingOrange.copy(alpha = 0.2f) else Color(0x66000000))
+                                .border(
+                                    if (isBackFocused) 2.5.dp else 1.dp,
+                                    if (isBackFocused) FocusRingOrange else Color.Transparent,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .focusRequester(backButtonFocusRequester)
+                                .focusable(interactionSource = backInteraction)
+                                .clickable(interactionSource = backInteraction, indication = null, onClick = onBack)
+                                .padding(8.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back",
-                                tint = Color.White
+                                tint = if (isBackFocused) FocusRingOrange else Color.White
                             )
                         }
 
@@ -609,14 +662,37 @@ fun DetailScreen(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
+                                .focusRequester(availableTabFocusRequester)
+                                .focusable(interactionSource = tab0InteractionSource)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    when (keyEvent.key) {
+                                        Key.DirectionRight -> {
+                                            allTorrentsTabFocusRequester.requestFocus()
+                                            true
+                                        }
+                                        Key.DirectionDown -> {
+                                            firstStreamFocusRequester.requestFocus()
+                                            true
+                                        }
+                                        Key.DirectionCenter,
+                                        Key.Enter,
+                                        Key.NumPadEnter,
+                                        Key.Spacebar -> {
+                                            selectedStreamTab = 0
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                }
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (isTab0Selected) PrimaryNeon.copy(alpha = 0.2f) else SurfaceCard)
+                                .background(if (isTab0Focused) FocusRingOrange.copy(alpha = 0.35f) else if (isTab0Selected) PrimaryNeon.copy(alpha = 0.2f) else SurfaceCard)
                                 .border(
-                                    1.5.dp,
-                                    if (isTab0Selected) PrimaryNeon else Color(0x22FFFFFF),
+                                    if (isTab0Focused) 2.5.dp else 1.5.dp,
+                                    if (isTab0Focused) FocusRingOrange else if (isTab0Selected) PrimaryNeon else Color(0x22FFFFFF),
                                     RoundedCornerShape(10.dp)
                                 )
-                                .clickable { selectedStreamTab = 0 }
+                                .clickable(interactionSource = tab0InteractionSource, indication = null) { selectedStreamTab = 0 }
                                 .padding(vertical = 9.dp),
                             contentAlignment = Alignment.Center
                         ) {
@@ -627,14 +703,14 @@ fun DetailScreen(
                                 Icon(
                                     imageVector = Icons.Default.Movie,
                                     contentDescription = null,
-                                    tint = if (isTab0Selected) PrimaryNeon else TextSecondary,
+                                    tint = if (isTab0Focused) FocusRingOrange else if (isTab0Selected) PrimaryNeon else TextSecondary,
                                     modifier = Modifier.size(15.dp)
                                 )
                                 Text(
                                     text = if (streams.isNotEmpty()) "Available (${streams.size})" else "Available",
-                                    color = if (isTab0Selected) Color.White else TextSecondary,
+                                    color = if (isTab0Focused) FocusRingOrange else if (isTab0Selected) Color.White else TextSecondary,
                                     fontSize = 12.sp,
-                                    fontWeight = if (isTab0Selected) FontWeight.Bold else FontWeight.Medium
+                                    fontWeight = if (isTab0Focused || isTab0Selected) FontWeight.Bold else FontWeight.Medium
                                 )
                             }
                         }
@@ -644,14 +720,41 @@ fun DetailScreen(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
+                                .focusRequester(allTorrentsTabFocusRequester)
+                                .focusable(interactionSource = tab1InteractionSource)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    when (keyEvent.key) {
+                                        Key.DirectionLeft -> {
+                                            availableTabFocusRequester.requestFocus()
+                                            true
+                                        }
+                                        Key.DirectionDown -> {
+                                            firstTorrentFocusRequester.requestFocus()
+                                            true
+                                        }
+                                        Key.DirectionCenter,
+                                        Key.Enter,
+                                        Key.NumPadEnter,
+                                        Key.Spacebar -> {
+                                            selectedStreamTab = 1
+                                            if (allTorrents.isEmpty()) {
+                                                val queryId = if (isSeries) selectedEpisode?.id else id
+                                                queryId?.let { loadAllTorrents(it) }
+                                            }
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                }
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (isTab1Selected) SecondaryCyan.copy(alpha = 0.2f) else SurfaceCard)
+                                .background(if (isTab1Focused) FocusRingOrange.copy(alpha = 0.35f) else if (isTab1Selected) SecondaryCyan.copy(alpha = 0.2f) else SurfaceCard)
                                 .border(
-                                    1.5.dp,
-                                    if (isTab1Selected) SecondaryCyan else Color(0x22FFFFFF),
+                                    if (isTab1Focused) 2.5.dp else 1.5.dp,
+                                    if (isTab1Focused) FocusRingOrange else if (isTab1Selected) SecondaryCyan else Color(0x22FFFFFF),
                                     RoundedCornerShape(10.dp)
                                 )
-                                .clickable {
+                                .clickable(interactionSource = tab1InteractionSource, indication = null) {
                                     selectedStreamTab = 1
                                     if (allTorrents.isEmpty()) {
                                         val queryId = if (isSeries) selectedEpisode?.id else id
@@ -668,14 +771,14 @@ fun DetailScreen(
                                 Icon(
                                     imageVector = Icons.Default.AddLink,
                                     contentDescription = null,
-                                    tint = if (isTab1Selected) SecondaryCyan else TextSecondary,
+                                    tint = if (isTab1Focused) FocusRingOrange else if (isTab1Selected) SecondaryCyan else TextSecondary,
                                     modifier = Modifier.size(15.dp)
                                 )
                                 Text(
                                     text = if (allTorrents.isNotEmpty()) "All Torrents (${allTorrents.size})" else "All Torrents (⚡)",
-                                    color = if (isTab1Selected) Color.White else TextSecondary,
+                                    color = if (isTab1Focused) FocusRingOrange else if (isTab1Selected) Color.White else TextSecondary,
                                     fontSize = 12.sp,
-                                    fontWeight = if (isTab1Selected) FontWeight.Bold else FontWeight.Medium
+                                    fontWeight = if (isTab1Focused || isTab1Selected) FontWeight.Bold else FontWeight.Medium
                                 )
                             }
                         }
@@ -737,7 +840,7 @@ fun DetailScreen(
                             }
                         }
                     } else {
-                        items(streams) { stream ->
+                        itemsIndexed(streams) { index, stream ->
                             val streamKey = stream.infoHash ?: stream.url ?: stream.name.orEmpty()
                             val isResolvingThis = resolvingStreamKey == streamKey
                             val currentQueryId = if (isSeries && selectedEpisode != null) {
@@ -807,6 +910,7 @@ fun DetailScreen(
                                 StreamCard(
                                     stream = stream,
                                     isResolving = isResolvingThis,
+                                    externalFocusRequester = if (index == 0) firstStreamFocusRequester else null,
                                     onClick = { launchStream(restartFromBeginning = false) },
                                     onRestart = { launchStream(restartFromBeginning = true) },
                                     onWatchlistToggle = {
@@ -928,7 +1032,7 @@ fun DetailScreen(
                             }
                         }
                     } else {
-                        items(allTorrents) { torr ->
+                        itemsIndexed(allTorrents) { index, torr ->
                             val streamKey = torr.infoHash ?: torr.url ?: torr.name.orEmpty()
                             val isResolvingThis = resolvingStreamKey == streamKey
                             val currentQueryId = if (isSeries && selectedEpisode != null) {
@@ -983,6 +1087,7 @@ fun DetailScreen(
                                 StreamCard(
                                     stream = torr,
                                     isResolving = isResolvingThis,
+                                    externalFocusRequester = if (index == 0) firstTorrentFocusRequester else null,
                                     onClick = {
                                         torr.infoHash?.let { hash ->
                                             p2pRestartFromBeginning = false
@@ -1158,16 +1263,20 @@ private fun EpisodeHorizontalCardItem(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    val bgColor = if (isSelected) PrimaryNeon.copy(alpha = 0.2f) else SurfaceCard
-    val borderColor = if (isSelected) PrimaryNeon else Color(0x22FFFFFF)
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    val bgColor = if (isFocused) FocusRingOrange.copy(alpha = 0.2f) else if (isSelected) PrimaryNeon.copy(alpha = 0.2f) else SurfaceCard
+    val borderColor = if (isFocused) FocusRingOrange else if (isSelected) PrimaryNeon else Color(0x22FFFFFF)
 
     Column(
         modifier = Modifier
             .width(145.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(bgColor)
-            .border(if (isSelected) 1.8.dp else 1.dp, borderColor, RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
+            .border(if (isFocused) 2.5.dp else if (isSelected) 1.8.dp else 1.dp, borderColor, RoundedCornerShape(10.dp))
+            .focusable(interactionSource = interactionSource)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(6.dp)
     ) {
         Box(
@@ -1201,12 +1310,12 @@ private fun EpisodeHorizontalCardItem(
                     .align(Alignment.TopStart)
                     .padding(4.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(if (isSelected) PrimaryNeon else Color(0xCC000000))
+                    .background(if (isFocused) FocusRingOrange else if (isSelected) PrimaryNeon else Color(0xCC000000))
                     .padding(horizontal = 5.dp, vertical = 1.5.dp)
             ) {
                 Text(
                     text = "EP ${episode.episode}",
-                    color = if (isSelected) Color.Black else Color.White,
+                    color = if (isFocused || isSelected) Color.Black else Color.White,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
@@ -1218,7 +1327,7 @@ private fun EpisodeHorizontalCardItem(
                         .align(Alignment.BottomEnd)
                         .padding(4.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(PrimaryNeon.copy(alpha = 0.85f))
+                        .background(if (isFocused) FocusRingOrange else PrimaryNeon.copy(alpha = 0.85f))
                         .padding(horizontal = 4.dp, vertical = 2.dp)
                 ) {
                     Text(
@@ -1236,9 +1345,9 @@ private fun EpisodeHorizontalCardItem(
         val epTitle = episode.name?.takeIf { it.isNotBlank() } ?: "Episode ${episode.episode}"
         Text(
             text = epTitle,
-            color = if (isSelected) PrimaryNeon else TextPrimary,
+            color = if (isFocused) FocusRingOrange else if (isSelected) PrimaryNeon else TextPrimary,
             fontSize = 11.5.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            fontWeight = if (isFocused || isSelected) FontWeight.Bold else FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )

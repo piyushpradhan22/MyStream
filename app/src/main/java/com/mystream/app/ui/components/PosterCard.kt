@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.mystream.app.data.model.StremioMetaPreview
+import com.mystream.app.ui.theme.FocusRingOrange
 import com.mystream.app.ui.theme.ImdbGold
 import com.mystream.app.ui.theme.PrimaryNeon
 import com.mystream.app.ui.theme.SurfaceCard
@@ -84,14 +85,16 @@ fun PosterCard(
     )
 
     val borderModifier = if (isFocused) {
-        Modifier.border(2.5.dp, PrimaryNeon, RoundedCornerShape(12.dp))
+        Modifier.border(2.5.dp, FocusRingOrange, RoundedCornerShape(12.dp))
     } else {
         Modifier.border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(12.dp))
     }
 
+    val widthModifier = if (width > 0) Modifier.width(width.dp) else Modifier.fillMaxWidth()
+
     Column(
         modifier = modifier
-            .width(width.dp)
+            .then(widthModifier)
             .scale(scale)
             .focusRequester(cardFocusRequester)
             .focusable(interactionSource = interactionSource)
@@ -276,7 +279,7 @@ fun PosterCard(
 
         Text(
             text = item.name,
-            color = if (isFocused) PrimaryNeon else TextPrimary,
+            color = if (isFocused) FocusRingOrange else TextPrimary,
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,

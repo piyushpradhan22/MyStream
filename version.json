@@ -1,6 +1,6 @@
 {
-  "versionCode": 3,
-  "versionName": "1.0.2",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.2/app-debug.apk",
-  "changelog": "• Unified project signing key (no signature conflicts)\n• Real-time in-app auto updater system\n• My Watchlist section with instant sync\n• PikPak smart size filtering (>6GB limit)\n• Season 0 placed at the end\n• Sleek settings and DPAD controls"
+  "versionCode": 4,
+  "versionName": "1.0.3",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.3/app-debug.apk",
+  "changelog": "• Fixed See More catalog infinite loading and grid rendering\n• Adaptive D-pad focus on movie cards and Back buttons\n• Renamed settings fields to Database URL and Password\n• Compact responsive input boxes on phone and TV\n• Removed default label from audio, subtitles, and cache\n• Targeted PostgreSQL cache matching for instant 100ms replay\n• Deep link support for direct movie navigation"
 }

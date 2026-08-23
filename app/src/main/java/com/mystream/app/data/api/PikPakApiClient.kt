@@ -43,6 +43,7 @@ data class PikPakResolvedFile(
 
 class PikPakApiClient(
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .dns(SystemFallbackDns)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .build()

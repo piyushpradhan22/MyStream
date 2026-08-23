@@ -103,6 +103,7 @@ import com.mystream.app.ui.components.AudioTrackSelectorDialog
 import com.mystream.app.ui.components.SpeedSelectorDialog
 import com.mystream.app.ui.components.SubtitleTrackSelectorDialog
 import com.mystream.app.ui.theme.AccentAmber
+import com.mystream.app.ui.theme.FocusRingOrange
 import com.mystream.app.ui.theme.PrimaryNeon
 import com.mystream.app.ui.theme.SecondaryCyan
 import com.mystream.app.ui.theme.TextMuted
@@ -160,9 +161,15 @@ fun PlayerScreen(
     var isLandscape by remember { mutableStateOf(true) }
     val playerFocusRequester = remember { FocusRequester() }
     val playPauseFocusRequester = remember { FocusRequester() }
+    val rewindFocusRequester = remember { FocusRequester() }
+    val forwardFocusRequester = remember { FocusRequester() }
     val seekbarFocusRequester = remember { FocusRequester() }
     val audioFocusRequester = remember { FocusRequester() }
     val subtitleFocusRequester = remember { FocusRequester() }
+    val aspectFocusRequester = remember { FocusRequester() }
+    val speedFocusRequester = remember { FocusRequester() }
+    val fullscreenFocusRequester = remember { FocusRequester() }
+    val lockFocusRequester = remember { FocusRequester() }
 
     val rewindInteraction = remember { MutableInteractionSource() }
     val playPauseInteraction = remember { MutableInteractionSource() }
@@ -170,6 +177,10 @@ fun PlayerScreen(
     val seekbarInteraction = remember { MutableInteractionSource() }
     val audioInteraction = remember { MutableInteractionSource() }
     val subtitleInteraction = remember { MutableInteractionSource() }
+    val aspectInteraction = remember { MutableInteractionSource() }
+    val speedInteraction = remember { MutableInteractionSource() }
+    val fullscreenInteraction = remember { MutableInteractionSource() }
+    val lockInteraction = remember { MutableInteractionSource() }
 
     val rewindFocused by rewindInteraction.collectIsFocusedAsState()
     val playPauseFocused by playPauseInteraction.collectIsFocusedAsState()
@@ -177,8 +188,10 @@ fun PlayerScreen(
     val seekbarFocused by seekbarInteraction.collectIsFocusedAsState()
     val audioFocused by audioInteraction.collectIsFocusedAsState()
     val subtitleFocused by subtitleInteraction.collectIsFocusedAsState()
-    var audioChipFocused by remember { mutableStateOf(false) }
-    var subtitleChipFocused by remember { mutableStateOf(false) }
+    val aspectFocused by aspectInteraction.collectIsFocusedAsState()
+    val speedFocused by speedInteraction.collectIsFocusedAsState()
+    val fullscreenFocused by fullscreenInteraction.collectIsFocusedAsState()
+    val lockFocused by lockInteraction.collectIsFocusedAsState()
 
     val changeVolumeByStep: (Int) -> Unit = { delta ->
         val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
@@ -187,6 +200,20 @@ fun PlayerScreen(
         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
         gestureFeedbackText = "Volume: ${(newVol * 100 / maxVol)}%"
         gestureFeedbackIcon = Icons.AutoMirrored.Filled.VolumeUp
+    }
+
+    // Lifecycle observer to pause playback on ON_PAUSE / ON_STOP (e.g. Netflix button / Home / App switch)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE || event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                playerManager.pause()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     // Immersive Full Screen (Hides Status Bar & Navigation Bar) + Screen On + Auto Landscape
@@ -237,6 +264,17 @@ fun PlayerScreen(
 
     LaunchedEffect(Unit) {
         playerFocusRequester.requestFocus()
+    }
+
+    val errorButtonFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(errorMessage) {
+        if (errorMessage != null) {
+            delay(100)
+            try {
+                errorButtonFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
     }
 
     LaunchedEffect(showControls) {
@@ -292,9 +330,47 @@ fun PlayerScreen(
         }
     }
 
-    fun handleCenterControlNavigation(event: KeyEvent): Boolean {
+    fun handlePlayPauseNav(event: KeyEvent): Boolean {
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
+            Key.DirectionLeft -> {
+                rewindFocusRequester.requestFocus()
+                true
+            }
+            Key.DirectionRight -> {
+                forwardFocusRequester.requestFocus()
+                true
+            }
+            Key.DirectionDown -> {
+                seekbarFocusRequester.requestFocus()
+                true
+            }
+            else -> false
+        }
+    }
+
+    fun handleRewindNav(event: KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        return when (event.key) {
+            Key.DirectionRight -> {
+                playPauseFocusRequester.requestFocus()
+                true
+            }
+            Key.DirectionDown -> {
+                seekbarFocusRequester.requestFocus()
+                true
+            }
+            else -> false
+        }
+    }
+
+    fun handleForwardNav(event: KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        return when (event.key) {
+            Key.DirectionLeft -> {
+                playPauseFocusRequester.requestFocus()
+                true
+            }
             Key.DirectionDown -> {
                 seekbarFocusRequester.requestFocus()
                 true
@@ -358,6 +434,82 @@ fun PlayerScreen(
         return when (event.key) {
             Key.DirectionLeft -> {
                 audioFocusRequester.requestFocus()
+                true
+            }
+            Key.DirectionRight -> {
+                aspectFocusRequester.requestFocus()
+                true
+            }
+            Key.DirectionUp -> {
+                seekbarFocusRequester.requestFocus()
+                true
+            }
+            else -> false
+        }
+    }
+
+    fun handleAspectNav(event: KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        return when (event.key) {
+            Key.DirectionLeft -> {
+                subtitleFocusRequester.requestFocus()
+                true
+            }
+            Key.DirectionRight -> {
+                speedFocusRequester.requestFocus()
+                true
+            }
+            Key.DirectionUp -> {
+                seekbarFocusRequester.requestFocus()
+                true
+            }
+            else -> false
+        }
+    }
+
+    fun handleSpeedNav(event: KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        return when (event.key) {
+            Key.DirectionLeft -> {
+                aspectFocusRequester.requestFocus()
+                true
+            }
+            Key.DirectionRight -> {
+                fullscreenFocusRequester.requestFocus()
+                true
+            }
+            Key.DirectionUp -> {
+                seekbarFocusRequester.requestFocus()
+                true
+            }
+            else -> false
+        }
+    }
+
+    fun handleFullscreenNav(event: KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        return when (event.key) {
+            Key.DirectionLeft -> {
+                speedFocusRequester.requestFocus()
+                true
+            }
+            Key.DirectionRight -> {
+                lockFocusRequester.requestFocus()
+                true
+            }
+            Key.DirectionUp -> {
+                seekbarFocusRequester.requestFocus()
+                true
+            }
+            else -> false
+        }
+    }
+
+    fun handleLockNav(event: KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        return when (event.key) {
+            Key.DirectionLeft -> {
+                fullscreenFocusRequester.requestFocus()
                 true
             }
             Key.DirectionUp -> {
@@ -451,13 +603,21 @@ fun PlayerScreen(
                     }
 
                     Key.DirectionLeft -> {
-                        triggerDebouncedNavSeek(-10L)
-                        true
+                        if (!showControls) {
+                            triggerDebouncedNavSeek(-10L)
+                            true
+                        } else {
+                            false
+                        }
                     }
 
                     Key.DirectionRight -> {
-                        triggerDebouncedNavSeek(10L)
-                        true
+                        if (!showControls) {
+                            triggerDebouncedNavSeek(10L)
+                            true
+                        } else {
+                            false
+                        }
                     }
 
                     Key.DirectionCenter,
@@ -531,6 +691,7 @@ fun PlayerScreen(
                 PlayerView(ctx).apply {
                     this.player = playerManager.player
                     useController = false // We use our sleek Compose HUD controls
+                    setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                     resizeMode = playerManager.getResizeModeForAspectRatio(aspectRatio)
                     keepScreenOn = true
                     subtitleView?.visibility = if (isSubtitleEnabled) android.view.View.VISIBLE else android.view.View.GONE
@@ -540,6 +701,7 @@ fun PlayerScreen(
                 if (playerView.player != playerManager.player) {
                     playerView.player = playerManager.player
                 }
+                playerView.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                 playerView.resizeMode = playerManager.getResizeModeForAspectRatio(aspectRatio)
                 playerView.subtitleView?.visibility = if (isSubtitleEnabled) android.view.View.VISIBLE else android.view.View.GONE
             },
@@ -621,38 +783,20 @@ fun PlayerScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
+                    val errorBtnInteraction = remember { MutableInteractionSource() }
+                    val isErrorBtnFocused by errorBtnInteraction.collectIsFocusedAsState()
+
                     androidx.compose.material3.Button(
                         onClick = onBack,
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = PrimaryNeon)
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = if (isErrorBtnFocused) FocusRingOrange else PrimaryNeon
+                        ),
+                        modifier = Modifier
+                            .focusRequester(errorButtonFocusRequester)
+                            .focusable(interactionSource = errorBtnInteraction)
                     ) {
                         Text(text = "Choose Another Stream", color = Color.White, fontWeight = FontWeight.Bold)
                     }
-                }
-            }
-        }
-
-        // Gesture Feedback Badge (Brightness / Volume / 10s Seek)
-        gestureFeedbackText?.let { text ->
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xCC000000))
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    gestureFeedbackIcon?.let { icon ->
-                        Icon(imageVector = icon, contentDescription = null, tint = PrimaryNeon)
-                    }
-                    Text(
-                        text = text,
-                        color = TextPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
                 }
             }
         }
@@ -694,7 +838,7 @@ fun PlayerScreen(
                         )
                     )
             ) {
-                // Top Header Bar
+                // Top Header Bar (Clean - only Back button & Title)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -734,64 +878,12 @@ fun PlayerScreen(
                         }
                     }
 
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Aspect Ratio switcher
-                        IconButton(onClick = { showAspectDialog = true }) {
+                    if (onEnterPiP != null) {
+                        IconButton(onClick = onEnterPiP) {
                             Icon(
-                                imageVector = Icons.Default.AspectRatio,
-                                contentDescription = "Aspect Ratio",
-                                tint = AccentAmber
-                            )
-                        }
-
-                        // Playback Speed
-                        IconButton(onClick = { showSpeedDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Default.Speed,
-                                contentDescription = "Speed",
-                                tint = TextSecondary
-                            )
-                        }
-
-                        // Fullscreen / Landscape Toggle Button
-                        IconButton(
-                            onClick = {
-                                isLandscape = !isLandscape
-                                val activity = context as? Activity
-                                if (isLandscape) {
-                                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                                } else {
-                                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                }
-                            }
-                        ) {
-                            Icon(
-                                imageVector = if (isLandscape) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                                contentDescription = "Toggle Landscape / Fullscreen",
-                                tint = PrimaryNeon
-                            )
-                        }
-
-                        // PiP button
-                        if (onEnterPiP != null) {
-                            IconButton(onClick = onEnterPiP) {
-                                Icon(
-                                    imageVector = Icons.Default.PictureInPicture,
-                                    contentDescription = "Picture-in-Picture",
-                                    tint = SecondaryCyan
-                                )
-                            }
-                        }
-
-                        // Lock Controls button
-                        IconButton(onClick = { isControlsLocked = true; showControls = false }) {
-                            Icon(
-                                imageVector = Icons.Default.LockOpen,
-                                contentDescription = "Lock Controls",
-                                tint = TextSecondary
+                                imageVector = Icons.Default.PictureInPicture,
+                                contentDescription = "Picture-in-Picture",
+                                tint = SecondaryCyan
                             )
                         }
                     }
@@ -808,8 +900,10 @@ fun PlayerScreen(
                         interactionSource = rewindInteraction,
                         modifier = Modifier
                             .size(50.dp)
+                            .focusRequester(rewindFocusRequester)
+                            .onPreviewKeyEvent(::handleRewindNav)
                             .clip(CircleShape)
-                            .then(if (rewindFocused) Modifier.border(2.dp, PrimaryNeon, CircleShape) else Modifier)
+                            .then(if (rewindFocused) Modifier.border(2.5.dp, FocusRingOrange, CircleShape) else Modifier)
                             .background(Color(0x55000000))
                     ) {
                         Icon(
@@ -826,9 +920,9 @@ fun PlayerScreen(
                         modifier = Modifier
                             .size(68.dp)
                             .focusRequester(playPauseFocusRequester)
-                            .onPreviewKeyEvent(::handleCenterControlNavigation)
+                            .onPreviewKeyEvent(::handlePlayPauseNav)
                             .clip(CircleShape)
-                            .then(if (playPauseFocused) Modifier.border(3.dp, Color.White, CircleShape) else Modifier)
+                            .then(if (playPauseFocused) Modifier.border(3.5.dp, FocusRingOrange, CircleShape) else Modifier)
                             .background(PrimaryNeon)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -853,8 +947,10 @@ fun PlayerScreen(
                         interactionSource = forwardInteraction,
                         modifier = Modifier
                             .size(50.dp)
+                            .focusRequester(forwardFocusRequester)
+                            .onPreviewKeyEvent(::handleForwardNav)
                             .clip(CircleShape)
-                            .then(if (forwardFocused) Modifier.border(2.dp, PrimaryNeon, CircleShape) else Modifier)
+                            .then(if (forwardFocused) Modifier.border(2.5.dp, FocusRingOrange, CircleShape) else Modifier)
                             .background(Color(0x55000000))
                     ) {
                         Icon(
@@ -866,7 +962,7 @@ fun PlayerScreen(
                     }
                 }
 
-                // Bottom HUD Bar (Seekbar, timestamps, audio and subtitle selectors)
+                // Bottom HUD Bar (Seekbar, timestamps, and combined bottom controls)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -910,8 +1006,8 @@ fun PlayerScreen(
                         },
                         valueRange = 0f..maxSliderValue,
                         colors = SliderDefaults.colors(
-                            thumbColor = PrimaryNeon,
-                            activeTrackColor = PrimaryNeon,
+                            thumbColor = FocusRingOrange,
+                            activeTrackColor = FocusRingOrange,
                             inactiveTrackColor = Color(0x40FFFFFF)
                         ),
                         interactionSource = seekbarInteraction,
@@ -922,7 +1018,7 @@ fun PlayerScreen(
                             .then(
                                 if (seekbarFocused) Modifier.border(
                                     width = 2.dp,
-                                    color = PrimaryNeon,
+                                    color = FocusRingOrange,
                                     shape = RoundedCornerShape(8.dp)
                                 ) else Modifier
                             )
@@ -930,117 +1026,264 @@ fun PlayerScreen(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Bottom Action Row (Audio Tracks, Subtitles, Aspect Ratio, Speed Indicator)
+                    // Bottom Action Row (Audio, Subtitles, Aspect Ratio, Speed, Screen, Lock)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // 1. Audio Track Selector Button
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier
+                                .focusRequester(audioFocusRequester)
+                                .focusable(interactionSource = audioInteraction)
+                                .onPreviewKeyEvent(::handleAudioNav)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (audioFocused) FocusRingOrange.copy(alpha = 0.25f) else Color(0x33FFFFFF))
+                                .then(
+                                    if (audioFocused) Modifier.border(
+                                        width = 2.dp,
+                                        color = FocusRingOrange,
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) else Modifier
+                                )
+                                .clickable(interactionSource = audioInteraction, indication = null) { showAudioDialog = true }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            // Audio Track Selector Button
-                            Row(
-                                modifier = Modifier
-                                    .focusRequester(audioFocusRequester)
-                                    .focusable(interactionSource = audioInteraction)
-                                    .onFocusChanged { audioChipFocused = it.isFocused }
-                                    .onPreviewKeyEvent(::handleAudioNav)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0x33FFFFFF))
-                                    .then(
-                                        if (audioChipFocused || audioFocused) Modifier.border(
-                                            width = 2.dp,
-                                            color = PrimaryNeon,
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) else Modifier
-                                    )
-                                    .clickable(interactionSource = audioInteraction, indication = null) { showAudioDialog = true }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Audiotrack,
-                                    contentDescription = null,
-                                    tint = PrimaryNeon,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "Audio",
-                                    color = TextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-
-                            // Subtitle Selector Button
-                            Row(
-                                modifier = Modifier
-                                    .focusRequester(subtitleFocusRequester)
-                                    .focusable(interactionSource = subtitleInteraction)
-                                    .onFocusChanged { subtitleChipFocused = it.isFocused }
-                                    .onPreviewKeyEvent(::handleSubtitleNav)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSubtitleEnabled) SecondaryCyan.copy(alpha = 0.25f) else Color(0x33FFFFFF))
-                                    .then(
-                                        if (subtitleChipFocused || subtitleFocused) Modifier.border(
-                                            width = 2.dp,
-                                            color = SecondaryCyan,
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) else Modifier
-                                    )
-                                    .clickable(interactionSource = subtitleInteraction, indication = null) { showSubtitleDialog = true }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Subtitles,
-                                    contentDescription = null,
-                                    tint = if (isSubtitleEnabled) SecondaryCyan else TextSecondary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = if (isSubtitleEnabled) "CC On" else "Subtitles",
-                                    color = TextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Audiotrack,
+                                contentDescription = null,
+                                tint = if (audioFocused) FocusRingOrange else PrimaryNeon,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Audio",
+                                color = if (audioFocused) FocusRingOrange else TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
 
-                        // Video Mode / Speed Info
+                        // 2. Subtitle Selector Button
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier
+                                .focusRequester(subtitleFocusRequester)
+                                .focusable(interactionSource = subtitleInteraction)
+                                .onPreviewKeyEvent(::handleSubtitleNav)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (subtitleFocused) FocusRingOrange.copy(alpha = 0.25f) else if (isSubtitleEnabled) SecondaryCyan.copy(alpha = 0.25f) else Color(0x33FFFFFF))
+                                .then(
+                                    if (subtitleFocused) Modifier.border(
+                                        width = 2.dp,
+                                        color = FocusRingOrange,
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) else Modifier
+                                )
+                                .clickable(interactionSource = subtitleInteraction, indication = null) { showSubtitleDialog = true }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.Subtitles,
+                                contentDescription = null,
+                                tint = if (subtitleFocused) FocusRingOrange else if (isSubtitleEnabled) SecondaryCyan else TextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = if (isSubtitleEnabled) "CC On" else "Subtitles",
+                                color = if (subtitleFocused) FocusRingOrange else TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // 3. Aspect Ratio / Fit Screen Button
+                        Row(
+                            modifier = Modifier
+                                .focusRequester(aspectFocusRequester)
+                                .focusable(interactionSource = aspectInteraction)
+                                .onPreviewKeyEvent(::handleAspectNav)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (aspectFocused) FocusRingOrange.copy(alpha = 0.25f) else Color(0x33FFAA00))
+                                .then(
+                                    if (aspectFocused) Modifier.border(
+                                        width = 2.dp,
+                                        color = FocusRingOrange,
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) else Modifier
+                                )
+                                .clickable(interactionSource = aspectInteraction, indication = null) { showAspectDialog = true }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AspectRatio,
+                                contentDescription = null,
+                                tint = if (aspectFocused) FocusRingOrange else AccentAmber,
+                                modifier = Modifier.size(16.dp)
+                            )
                             Text(
                                 text = aspectRatio.label.substringBefore(" ("),
-                                color = AccentAmber,
+                                color = if (aspectFocused) FocusRingOrange else AccentAmber,
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0x33FFAA00))
-                                    .clickable { playerManager.cycleAspectRatio() }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                fontWeight = FontWeight.Bold
                             )
-
-                            if (playbackSpeed != 1.0f) {
-                                Text(
-                                    text = "${playbackSpeed}x",
-                                    color = PrimaryNeon,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0x336C5CE7))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
                         }
+
+                        // 4. Playback Speed Button
+                        Row(
+                            modifier = Modifier
+                                .focusRequester(speedFocusRequester)
+                                .focusable(interactionSource = speedInteraction)
+                                .onPreviewKeyEvent(::handleSpeedNav)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (speedFocused) FocusRingOrange.copy(alpha = 0.25f) else Color(0x336C5CE7))
+                                .then(
+                                    if (speedFocused) Modifier.border(
+                                        width = 2.dp,
+                                        color = FocusRingOrange,
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) else Modifier
+                                )
+                                .clickable(interactionSource = speedInteraction, indication = null) { showSpeedDialog = true }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Speed,
+                                contentDescription = null,
+                                tint = if (speedFocused) FocusRingOrange else PrimaryNeon,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "${playbackSpeed}x",
+                                color = if (speedFocused) FocusRingOrange else PrimaryNeon,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // 5. Fullscreen / Orientation Toggle Button
+                        Row(
+                            modifier = Modifier
+                                .focusRequester(fullscreenFocusRequester)
+                                .focusable(interactionSource = fullscreenInteraction)
+                                .onPreviewKeyEvent(::handleFullscreenNav)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (fullscreenFocused) FocusRingOrange.copy(alpha = 0.25f) else Color(0x33FFFFFF))
+                                .then(
+                                    if (fullscreenFocused) Modifier.border(
+                                        width = 2.dp,
+                                        color = FocusRingOrange,
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) else Modifier
+                                )
+                                .clickable(interactionSource = fullscreenInteraction, indication = null) {
+                                    isLandscape = !isLandscape
+                                    val activity = context as? Activity
+                                    if (isLandscape) {
+                                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                    } else {
+                                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                    }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isLandscape) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                contentDescription = null,
+                                tint = if (fullscreenFocused) FocusRingOrange else Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = if (isLandscape) "Landscape" else "Portrait",
+                                color = if (fullscreenFocused) FocusRingOrange else TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // 6. Lock Controls Button
+                        Row(
+                            modifier = Modifier
+                                .focusRequester(lockFocusRequester)
+                                .focusable(interactionSource = lockInteraction)
+                                .onPreviewKeyEvent(::handleLockNav)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (lockFocused) FocusRingOrange.copy(alpha = 0.25f) else Color(0x33FFFFFF))
+                                .then(
+                                    if (lockFocused) Modifier.border(
+                                        width = 2.dp,
+                                        color = FocusRingOrange,
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) else Modifier
+                                )
+                                .clickable(interactionSource = lockInteraction, indication = null) {
+                                    isControlsLocked = true
+                                    showControls = false
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LockOpen,
+                                contentDescription = null,
+                                tint = if (lockFocused) FocusRingOrange else TextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Lock",
+                                color = if (lockFocused) FocusRingOrange else TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Gesture Feedback Badge (Brightness / Volume / Seek Delta & Timestamp) - Topmost overlay positioned above seekbar
+        gestureFeedbackText?.let { text ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 120.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xE6000000))
+                        .border(1.5.dp, FocusRingOrange.copy(alpha = 0.9f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 22.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        gestureFeedbackIcon?.let { icon ->
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = FocusRingOrange,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Text(
+                            text = text,
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }

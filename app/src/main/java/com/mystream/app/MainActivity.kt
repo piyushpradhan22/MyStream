@@ -24,6 +24,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.navigation.navDeepLink
 import com.mystream.app.data.model.MediaPlaybackItem
 import com.mystream.app.ui.screens.CatalogGridScreen
 import com.mystream.app.ui.screens.DetailScreen
@@ -45,6 +46,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var app: MyStreamApplication
     private var activePlaybackItem by mutableStateOf<MediaPlaybackItem?>(null)
     private var isInPiPMode by mutableStateOf(false)
+    private var globalNavController: androidx.navigation.NavHostController? = null
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        globalNavController?.handleDeepLink(intent)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,6 +76,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun AppNavigation() {
         val navController = rememberNavController()
+        globalNavController = navController
 
         NavHost(
             navController = navController,
@@ -81,8 +90,9 @@ class MainActivity : ComponentActivity() {
                     },
                     onNavigateToCatalog = { title, type, catalogId, genre ->
                         val encodedTitle = URLEncoder.encode(title, "UTF-8")
-                        val genreParam = if (genre != null) "&genre=${URLEncoder.encode(genre, "UTF-8")}" else ""
-                        navController.navigate("catalog?title=$encodedTitle&type=$type&catalogId=$catalogId$genreParam")
+                        val genreValue = genre ?: "none"
+                        val encodedGenre = URLEncoder.encode(genreValue, "UTF-8")
+                        navController.navigate("catalog?title=$encodedTitle&type=$type&catalogId=$catalogId&genre=$encodedGenre")
                     },
                     onPlayDirect = { item ->
                         activePlaybackItem = item
@@ -103,19 +113,23 @@ class MainActivity : ComponentActivity() {
                     navArgument("title") { type = NavType.StringType; defaultValue = "Catalog" },
                     navArgument("type") { type = NavType.StringType; defaultValue = "movie" },
                     navArgument("catalogId") { type = NavType.StringType; defaultValue = "top" },
-                    navArgument("genre") { type = NavType.StringType; nullable = true; defaultValue = null }
+                    navArgument("genre") { type = NavType.StringType; defaultValue = "none" }
                 )
             ) { backStackEntry ->
-                val title = backStackEntry.arguments?.getString("title") ?: "Catalog"
+                val rawTitle = backStackEntry.arguments?.getString("title") ?: "Catalog"
+                val title = try { java.net.URLDecoder.decode(rawTitle, "UTF-8") } catch (_: Exception) { rawTitle }
                 val type = backStackEntry.arguments?.getString("type") ?: "movie"
                 val catalogId = backStackEntry.arguments?.getString("catalogId") ?: "top"
-                val genre = backStackEntry.arguments?.getString("genre")
+                val rawGenre = backStackEntry.arguments?.getString("genre")
+                val cleanGenre = if (rawGenre.isNullOrBlank() || rawGenre == "null" || rawGenre == "{genre}" || rawGenre == "none") null else {
+                    try { java.net.URLDecoder.decode(rawGenre, "UTF-8") } catch (_: Exception) { rawGenre }
+                }
 
                 CatalogGridScreen(
                     title = title,
                     type = type,
                     catalogId = catalogId,
-                    genre = genre,
+                    genre = cleanGenre,
                     repository = app.sourcesRepository,
                     onBack = { navController.popBackStack() },
                     onNavigateToDetail = { t, id ->
@@ -129,6 +143,10 @@ class MainActivity : ComponentActivity() {
                 arguments = listOf(
                     navArgument("type") { type = NavType.StringType },
                     navArgument("id") { type = NavType.StringType }
+                ),
+                deepLinks = listOf(
+                    navDeepLink { uriPattern = "mystream://detail/{type}/{id}" },
+                    navDeepLink { uriPattern = "https://mystream.app/detail/{type}/{id}" }
                 )
             ) { backStackEntry ->
                 val type = backStackEntry.arguments?.getString("type") ?: "movie"
@@ -211,6 +229,22 @@ class MainActivity : ComponentActivity() {
         // Auto-enter PiP if player is actively playing
         if (activePlaybackItem != null && app.playerManager.isPlaying.value) {
             enterPiPMode()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (!isInPiPMode) {
+            app.playerManager.pause()
+            Log.d(TAG, "Activity onPause: paused player")
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isInPiPMode) {
+            app.playerManager.pause()
+            Log.d(TAG, "Activity onStop: paused player")
         }
     }
 

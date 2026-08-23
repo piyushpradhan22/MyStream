@@ -88,12 +88,16 @@ class MyStreamPlayerManager(
         setMediaCodecSelector(MediaCodecSelector.DEFAULT)
     }
 
-    private val dataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+    private val okHttpClient = OkHttpClient.Builder()
+        .dns(com.mystream.app.data.api.SystemFallbackDns)
+        .connectTimeout(25, TimeUnit.SECONDS)
+        .readTimeout(35, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .build()
+
+    private val dataSourceFactory = OkHttpDataSource.Factory(okHttpClient)
         .setUserAgent("ANDROID-com.pikcloud.pikpak/1.47.1")
-        .setConnectTimeoutMs(25000)
-        .setReadTimeoutMs(35000)
-        .setAllowCrossProtocolRedirects(true)
-        .setKeepPostFor302Redirects(true)
         .setTransferListener(bandwidthMeter)
 
     private val mediaSourceFactory = DefaultMediaSourceFactory(context)

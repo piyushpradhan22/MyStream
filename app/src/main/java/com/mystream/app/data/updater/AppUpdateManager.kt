@@ -16,6 +16,7 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
+import com.mystream.app.data.api.SystemFallbackDns
 
 @Serializable
 data class GitHubReleaseAsset(
@@ -35,8 +36,8 @@ data class GitHubReleaseResponse(
 
 @Serializable
 data class RawVersionConfig(
-    val versionCode: Int = 1,
-    val versionName: String = "1.0.0",
+    val versionCode: Int = 3,
+    val versionName: String = "1.0.2",
     val downloadUrl: String = "",
     val changelog: String? = null,
     val mandatory: Boolean = false
@@ -61,6 +62,7 @@ class AppUpdateManager(private val context: Context) {
     }
 
     private val httpClient = OkHttpClient.Builder()
+        .dns(SystemFallbackDns)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)

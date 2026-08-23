@@ -22,3 +22,7 @@ val OverlayGradientDark = Color(0xE60A0D14)
 val GlassSurface = Color(0xCC131824)
 val GlassBorder = Color(0x33FFFFFF)
 val ImdbGold = Color(0xFFF5C518)
+
+// Modern Cinema Orange Uniform Focus Highlighting Ring
+val FocusRingOrange = Color(0xFFFF7A00)
+val FocusRingOrangeGlow = Color(0x66FF7A00)
