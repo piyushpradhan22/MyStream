@@ -154,7 +154,7 @@ class AppUpdateManager(private val context: Context) {
                 currentVersionCode = currentCode,
                 latestVersionName = raw.versionName,
                 latestVersionCode = raw.versionCode,
-                downloadUrl = raw.downloadUrl,
+                downloadUrl = resolveVersionDownloadUrl(raw.versionName, raw.downloadUrl),
                 changelog = raw.changelog ?: "New update available."
             )
         } catch (e: Exception) {
@@ -230,7 +230,7 @@ class AppUpdateManager(private val context: Context) {
                 currentVersionCode = currentCode,
                 latestVersionName = raw.versionName,
                 latestVersionCode = raw.versionCode,
-                downloadUrl = raw.downloadUrl,
+                downloadUrl = resolveVersionDownloadUrl(raw.versionName, raw.downloadUrl),
                 changelog = raw.changelog ?: "New update available."
             )
         } catch (e: Exception) {
@@ -242,6 +242,16 @@ class AppUpdateManager(private val context: Context) {
     private fun parseVersionCodeFromTagOrName(version: String): Int {
         val digits = version.filter { it.isDigit() }
         return digits.toIntOrNull() ?: 1
+    }
+
+    private fun resolveVersionDownloadUrl(versionName: String, configuredUrl: String): String {
+        val cleanVersion = versionName.trim().removePrefix("v").removePrefix("V")
+        val expectedTag = "v$cleanVersion"
+        val expectedPath = "/releases/download/$expectedTag/"
+        if (configuredUrl.isNotBlank() && configuredUrl.contains(expectedPath)) {
+            return configuredUrl
+        }
+        return "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/download/$expectedTag/app-debug.apk"
     }
 
     private fun isRemoteVersionNewer(currentName: String, currentCode: Int, remoteName: String, remoteCode: Int): Boolean {
