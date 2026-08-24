@@ -177,14 +177,19 @@ class AppUpdateManager(private val context: Context) {
             val bodyString = response.body?.string() ?: return null
             val release = json.decodeFromString<GitHubReleaseResponse>(bodyString)
 
-            // Find APK asset
-            val apkAsset = release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
-                ?: release.assets.firstOrNull()
+            // Find APK asset matching device ABI or universal release
+            val deviceAbis = android.os.Build.SUPPORTED_ABIS.toList()
+            val apkAsset = release.assets.firstOrNull { asset ->
+                val name = asset.name.lowercase()
+                name.endsWith(".apk") && deviceAbis.any { abi -> name.contains(abi.lowercase()) }
+            } ?: release.assets.firstOrNull { it.name.endsWith("universal-release.apk", ignoreCase = true) }
+              ?: release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
+              ?: release.assets.firstOrNull()
 
             val rawTag = release.tagName.trim()
             val cleanVersion = rawTag.removePrefix("v").removePrefix("V").trim()
             val downloadUrl = apkAsset?.browserDownloadUrl
-                ?: "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/download/$rawTag/app-release.apk"
+                ?: resolveVersionDownloadUrl(cleanVersion, "")
 
             val latestCode = parseVersionCodeFromTagOrName(cleanVersion)
             val isAvailable = isRemoteVersionNewer(currentName, currentCode, cleanVersion, latestCode)
@@ -248,10 +253,17 @@ class AppUpdateManager(private val context: Context) {
         val cleanVersion = versionName.trim().removePrefix("v").removePrefix("V")
         val expectedTag = "v$cleanVersion"
         val expectedPath = "/releases/download/$expectedTag/"
-        if (configuredUrl.isNotBlank() && configuredUrl.contains(expectedPath)) {
+        if (configuredUrl.isNotBlank() && configuredUrl.contains(expectedPath) && !configuredUrl.endsWith("app-debug.apk")) {
             return configuredUrl
         }
-        return "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/download/$expectedTag/app-debug.apk"
+        val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull()?.lowercase().orEmpty()
+        val apkName = when {
+            abi.contains("arm64") -> "app-arm64-v8a-release.apk"
+            abi.contains("v7a") || abi.contains("arm") -> "app-armeabi-v7a-release.apk"
+            abi.contains("x86_64") -> "app-x86_64-release.apk"
+            else -> "app-universal-release.apk"
+        }
+        return "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/download/$expectedTag/$apkName"
     }
 
     private fun isRemoteVersionNewer(currentName: String, currentCode: Int, remoteName: String, remoteCode: Int): Boolean {
