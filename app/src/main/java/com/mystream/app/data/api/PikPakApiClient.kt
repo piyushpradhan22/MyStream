@@ -417,22 +417,63 @@ class PikPakApiClient(
                 val medias = rootJson["medias"]?.jsonArray
                 val mediaUrl = medias?.firstOrNull()?.jsonObject?.get("link")?.jsonObject?.get("url")?.jsonPrimitive?.content
                 if (!mediaUrl.isNullOrBlank()) {
-                    Log.i(TAG, "🎉 EXTRACTED HIGH-SPEED DIRECT STREAM URL: ${mediaUrl.take(70)}...")
-                    return@withContext Result.success(mediaUrl)
+                    if (isStreamUrlLiveAndPlayable(mediaUrl)) {
+                        Log.i(TAG, "🎉 EXTRACTED HIGH-SPEED DIRECT STREAM URL: ${mediaUrl.take(70)}...")
+                        return@withContext Result.success(mediaUrl)
+                    } else {
+                        Log.w(TAG, "⚠️ Media URL failed live probe (403/ARCHIVE/0-byte), trying alternate link...")
+                    }
                 }
 
                 // 2. Web Content Direct Link
                 val directLink = rootJson["web_content_link"]?.jsonPrimitive?.content
                 if (!directLink.isNullOrBlank()) {
-                    Log.i(TAG, "🎉 EXTRACTED WEB_CONTENT_LINK: ${directLink.take(70)}...")
-                    return@withContext Result.success(directLink)
+                    if (isStreamUrlLiveAndPlayable(directLink)) {
+                        Log.i(TAG, "🎉 EXTRACTED WEB_CONTENT_LINK: ${directLink.take(70)}...")
+                        return@withContext Result.success(directLink)
+                    } else {
+                        Log.w(TAG, "⚠️ Web content link failed live probe, rejecting stale cache...")
+                    }
                 }
 
-                Result.failure(IOException("No stream URL in file details"))
+                Result.failure(IOException("No playable stream URL in file details"))
             }
         } catch (e: Exception) {
             Log.e(TAG, "getDirectStreamUrlForFile error", e)
             Result.failure(e)
+        }
+    }
+
+    private fun isStreamUrlLiveAndPlayable(url: String): Boolean {
+        return try {
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "ANDROID-$PACKAGE_NAME/$CLIENT_VERSION")
+                .header("Range", "bytes=0-2048")
+                .get()
+                .build()
+            client.newCall(req).execute().use { res ->
+                val storageClass = res.header("X-Tos-Storage-Class") ?: res.header("x-xos-storage-class")
+                if (storageClass.equals("ARCHIVE", ignoreCase = true) || storageClass.equals("COLD", ignoreCase = true)) {
+                    Log.w(TAG, "Stream probe: storage class is $storageClass")
+                    return false
+                }
+                if (res.code !in 200..206) {
+                    Log.w(TAG, "Stream probe: HTTP error ${res.code}")
+                    return false
+                }
+                val bodyStream = res.body?.byteStream() ?: return false
+                val buf = ByteArray(64)
+                val readBytes = bodyStream.read(buf)
+                if (readBytes <= 0) {
+                    Log.w(TAG, "Stream probe: 0 bytes delivered from CDN")
+                    return false
+                }
+                true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Stream probe exception: ${e.message}")
+            false
         }
     }
 }

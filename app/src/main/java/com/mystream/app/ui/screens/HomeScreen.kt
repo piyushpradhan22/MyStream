@@ -110,6 +110,8 @@ fun HomeScreen(
     val watchlist by repository.watchlistFlow.collectAsState(initial = emptyList())
 
     val heroPlayFocusRequester = remember { FocusRequester() }
+    val continueWatchingFirstItemFR = remember { FocusRequester() }
+    val watchlistFirstItemFR = remember { FocusRequester() }
 
     val row1FirstItemFR = remember { FocusRequester() }
     val row1SeeMoreFR = remember { FocusRequester() }
@@ -274,6 +276,17 @@ fun HomeScreen(
                         HeroBanner(
                             item = hero,
                             playFocusRequester = heroPlayFocusRequester,
+                            onNavigateDown = {
+                                try {
+                                    if (continueWatchingList.isNotEmpty()) {
+                                        continueWatchingFirstItemFR.requestFocus()
+                                    } else if (watchlist.isNotEmpty()) {
+                                        watchlistFirstItemFR.requestFocus()
+                                    } else {
+                                        row1FirstItemFR.requestFocus()
+                                    }
+                                } catch (_: Exception) {}
+                            },
                             onPlayClick = {
                                 onNavigateToDetail(hero.type, hero.id)
                             },
@@ -419,7 +432,7 @@ fun HomeScreen(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                items(continueWatchingList, key = { it.mediaId }) { record ->
+                                itemsIndexed(continueWatchingList, key = { _, record -> record.mediaId }) { index, record ->
                                     val preview = StremioMetaPreview(
                                         id = record.imdbId,
                                         type = record.type,
@@ -430,6 +443,28 @@ fun HomeScreen(
                                     PosterCard(
                                         item = preview,
                                         progressFraction = record.progressFraction,
+                                        modifier = Modifier
+                                            .then(if (index == 0) Modifier.focusRequester(continueWatchingFirstItemFR) else Modifier)
+                                            .onPreviewKeyEvent { keyEvent ->
+                                                if (keyEvent.type == KeyEventType.KeyDown) {
+                                                    when (keyEvent.key) {
+                                                        Key.DirectionUp -> {
+                                                            try { heroPlayFocusRequester.requestFocus(); true } catch (_: Exception) { false }
+                                                        }
+                                                        Key.DirectionDown -> {
+                                                            try {
+                                                                if (watchlist.isNotEmpty()) {
+                                                                    watchlistFirstItemFR.requestFocus()
+                                                                } else {
+                                                                    row1FirstItemFR.requestFocus()
+                                                                }
+                                                                true
+                                                            } catch (_: Exception) { false }
+                                                        }
+                                                        else -> false
+                                                    }
+                                                } else false
+                                            },
                                         onClearClick = {
                                             scope.launch {
                                                 repository.removePlaybackProgress(record.mediaId)
@@ -511,7 +546,7 @@ fun HomeScreen(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                items(watchlist, key = { it.id }) { item ->
+                                itemsIndexed(watchlist, key = { _, item -> item.id }) { index, item ->
                                     val preview = StremioMetaPreview(
                                         id = item.imdbId,
                                         type = item.type,
@@ -522,6 +557,28 @@ fun HomeScreen(
                                     PosterCard(
                                         item = preview,
                                         progressFraction = null,
+                                        modifier = Modifier
+                                            .then(if (index == 0) Modifier.focusRequester(watchlistFirstItemFR) else Modifier)
+                                            .onPreviewKeyEvent { keyEvent ->
+                                                if (keyEvent.type == KeyEventType.KeyDown) {
+                                                    when (keyEvent.key) {
+                                                        Key.DirectionUp -> {
+                                                            try {
+                                                                if (continueWatchingList.isNotEmpty()) {
+                                                                    continueWatchingFirstItemFR.requestFocus()
+                                                                } else {
+                                                                    heroPlayFocusRequester.requestFocus()
+                                                                }
+                                                                true
+                                                            } catch (_: Exception) { false }
+                                                        }
+                                                        Key.DirectionDown -> {
+                                                            try { row1FirstItemFR.requestFocus(); true } catch (_: Exception) { false }
+                                                        }
+                                                        else -> false
+                                                    }
+                                                } else false
+                                            },
                                         onClearClick = {
                                             scope.launch {
                                                 repository.removeFromWatchlist(item.id)
@@ -545,11 +602,19 @@ fun HomeScreen(
                             items = topMovies,
                             firstItemFocusRequester = row1FirstItemFR,
                             seeMoreFocusRequester = row1SeeMoreFR,
-                            onNavigateUpFromSeeMore = {
-                                try { heroPlayFocusRequester.requestFocus() } catch (_: Exception) {}
+                            onNavigateUpFromCards = {
+                                try {
+                                    if (watchlist.isNotEmpty()) {
+                                        watchlistFirstItemFR.requestFocus()
+                                    } else if (continueWatchingList.isNotEmpty()) {
+                                        continueWatchingFirstItemFR.requestFocus()
+                                    } else {
+                                        heroPlayFocusRequester.requestFocus()
+                                    }
+                                } catch (_: Exception) {}
                             },
                             onNavigateDownFromCards = {
-                                try { row2SeeMoreFR.requestFocus() } catch (_: Exception) {}
+                                try { row2FirstItemFR.requestFocus() } catch (_: Exception) {}
                             },
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Popular Movies", "movie", "top", null)
@@ -567,11 +632,11 @@ fun HomeScreen(
                             items = topSeries,
                             firstItemFocusRequester = row2FirstItemFR,
                             seeMoreFocusRequester = row2SeeMoreFR,
-                            onNavigateUpFromSeeMore = {
+                            onNavigateUpFromCards = {
                                 try { row1FirstItemFR.requestFocus() } catch (_: Exception) {}
                             },
                             onNavigateDownFromCards = {
-                                try { row3SeeMoreFR.requestFocus() } catch (_: Exception) {}
+                                try { row3FirstItemFR.requestFocus() } catch (_: Exception) {}
                             },
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Popular Series", "series", "top", null)
@@ -589,11 +654,11 @@ fun HomeScreen(
                             items = actionMovies,
                             firstItemFocusRequester = row3FirstItemFR,
                             seeMoreFocusRequester = row3SeeMoreFR,
-                            onNavigateUpFromSeeMore = {
+                            onNavigateUpFromCards = {
                                 try { row2FirstItemFR.requestFocus() } catch (_: Exception) {}
                             },
                             onNavigateDownFromCards = {
-                                try { row4SeeMoreFR.requestFocus() } catch (_: Exception) {}
+                                try { row4FirstItemFR.requestFocus() } catch (_: Exception) {}
                             },
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Action & Adventure", "movie", "top", "Action")
@@ -611,11 +676,11 @@ fun HomeScreen(
                             items = scifiMovies,
                             firstItemFocusRequester = row4FirstItemFR,
                             seeMoreFocusRequester = row4SeeMoreFR,
-                            onNavigateUpFromSeeMore = {
+                            onNavigateUpFromCards = {
                                 try { row3FirstItemFR.requestFocus() } catch (_: Exception) {}
                             },
                             onNavigateDownFromCards = {
-                                try { row5SeeMoreFR.requestFocus() } catch (_: Exception) {}
+                                try { row5FirstItemFR.requestFocus() } catch (_: Exception) {}
                             },
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Sci-Fi & Thriller", "movie", "top", "Sci-Fi")
@@ -633,7 +698,7 @@ fun HomeScreen(
                             items = comedySeries,
                             firstItemFocusRequester = row5FirstItemFR,
                             seeMoreFocusRequester = row5SeeMoreFR,
-                            onNavigateUpFromSeeMore = {
+                            onNavigateUpFromCards = {
                                 try { row4FirstItemFR.requestFocus() } catch (_: Exception) {}
                             },
                             onNavigateDownFromCards = null,
@@ -712,16 +777,15 @@ fun HomeScreen(
 private fun MediaCatalogRow(
     title: String,
     items: List<StremioMetaPreview>,
+    firstItemFocusRequester: FocusRequester,
+    seeMoreFocusRequester: FocusRequester,
+    onNavigateUpFromCards: (() -> Unit)? = null,
+    onNavigateDownFromCards: (() -> Unit)? = null,
     onSeeMoreClick: () -> Unit,
-    onItemClick: (StremioMetaPreview) -> Unit,
-    modifier: Modifier = Modifier,
-    firstItemFocusRequester: FocusRequester = remember { FocusRequester() },
-    seeMoreFocusRequester: FocusRequester = remember { FocusRequester() },
-    onNavigateUpFromSeeMore: (() -> Unit)? = null,
-    onNavigateDownFromCards: (() -> Unit)? = null
+    onItemClick: (StremioMetaPreview) -> Unit
 ) {
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 10.dp)
     ) {
@@ -771,9 +835,9 @@ private fun MediaCatalogRow(
                                     }
                                 }
                                 Key.DirectionUp -> {
-                                    if (onNavigateUpFromSeeMore != null) {
+                                    if (onNavigateUpFromCards != null) {
                                         try {
-                                            onNavigateUpFromSeeMore()
+                                            onNavigateUpFromCards()
                                             true
                                         } catch (_: Exception) {
                                             false
@@ -815,12 +879,14 @@ private fun MediaCatalogRow(
                             if (keyEvent.type == KeyEventType.KeyDown) {
                                 when (keyEvent.key) {
                                     Key.DirectionUp -> {
-                                        try {
-                                            seeMoreFocusRequester.requestFocus()
-                                            true
-                                        } catch (_: Exception) {
-                                            false
-                                        }
+                                        if (onNavigateUpFromCards != null) {
+                                            try {
+                                                onNavigateUpFromCards()
+                                                true
+                                            } catch (_: Exception) {
+                                                false
+                                            }
+                                        } else false
                                     }
                                     Key.DirectionDown -> {
                                         if (onNavigateDownFromCards != null) {

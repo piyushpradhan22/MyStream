@@ -1,6 +1,7 @@
 package com.mystream.app.ui.screens
 
 import androidx.compose.foundation.background
+import com.mystream.app.ui.utils.safeRequestFocus
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -141,6 +142,7 @@ fun DetailScreen(
 
     val listState = rememberLazyListState()
     val backButtonFocusRequester = remember { FocusRequester() }
+    val watchlistButtonFocusRequester = remember { FocusRequester() }
 
     val scope = rememberCoroutineScope()
 
@@ -158,9 +160,11 @@ fun DetailScreen(
 
     fun loadStreams(queryId: String, forceRefresh: Boolean = false) {
         scope.launch {
-            isStreamsLoading = true
-            isResolvingMoreStreams = true
-            streams = emptyList()
+            if (forceRefresh || streams.isEmpty()) {
+                isStreamsLoading = true
+                isResolvingMoreStreams = true
+                if (forceRefresh) streams = emptyList()
+            }
             try {
                 repository.streamStreamsForMedia(type, queryId, forceRefresh = forceRefresh).collect { newStreams ->
                     streams = newStreams
@@ -196,12 +200,15 @@ fun DetailScreen(
             metaDetail = detail
 
             if (!detail.type.equals("series", ignoreCase = true)) {
-                loadStreams(id)
+                if (streams.isEmpty()) {
+                    loadStreams(id, forceRefresh = false)
+                }
             } else {
                 // Do not auto-fetch on initial load for series; wait for user to click an episode
-                selectedEpisode = null
-                streams = emptyList()
-                allTorrents = emptyList()
+                if (selectedEpisode == null) {
+                    streams = emptyList()
+                    allTorrents = emptyList()
+                }
             }
         } catch (e: Exception) {
             // handle error
@@ -304,6 +311,20 @@ fun DetailScreen(
                                 )
                                 .focusRequester(backButtonFocusRequester)
                                 .focusable(interactionSource = backInteraction)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    when (keyEvent.key) {
+                                        Key.DirectionRight -> {
+                                            watchlistButtonFocusRequester.safeRequestFocus()
+                                            true
+                                        }
+                                        Key.DirectionDown -> {
+                                            availableTabFocusRequester.safeRequestFocus()
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                }
                                 .clickable(interactionSource = backInteraction, indication = null, onClick = onBack)
                                 .padding(8.dp),
                             contentAlignment = Alignment.Center
@@ -317,41 +338,94 @@ fun DetailScreen(
 
                         // Top Watchlist Button
                         val isMediaInWatchlist = metaDetail?.id?.let { mId -> watchlist.any { it.imdbId == mId } } ?: false
-                        IconButton(
-                            onClick = {
-                                metaDetail?.let { dt ->
-                                    scope.launch {
-                                        if (isMediaInWatchlist) {
-                                            repository.removeFromWatchlist(dt.id)
-                                            android.widget.Toast.makeText(context, "Removed from Watchlist", android.widget.Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            val watchItem = com.mystream.app.data.model.WatchlistItem(
-                                                id = dt.id,
-                                                imdbId = dt.id,
-                                                title = dt.name,
-                                                subtitle = dt.genres.firstOrNull() ?: dt.year,
-                                                posterUrl = dt.poster,
-                                                backdropUrl = dt.background,
-                                                type = dt.type,
-                                                dateAddedMs = System.currentTimeMillis()
-                                            )
-                                            repository.addToWatchlist(watchItem)
-                                            android.widget.Toast.makeText(context, "Added to Watchlist!", android.widget.Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                            },
+                        val watchlistInteraction = remember { MutableInteractionSource() }
+                        val isWatchlistFocused by watchlistInteraction.collectIsFocusedAsState()
+
+                        Box(
                             modifier = Modifier
                                 .statusBarsPadding()
                                 .padding(top = 18.dp, end = 16.dp)
                                 .align(Alignment.TopEnd)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0x66000000))
+                                .background(if (isWatchlistFocused) FocusRingOrange.copy(alpha = 0.2f) else Color(0x66000000))
+                                .border(
+                                    if (isWatchlistFocused) 2.5.dp else 1.dp,
+                                    if (isWatchlistFocused) FocusRingOrange else Color.Transparent,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .focusRequester(watchlistButtonFocusRequester)
+                                .focusable(interactionSource = watchlistInteraction)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    when (keyEvent.key) {
+                                        Key.DirectionLeft -> {
+                                            backButtonFocusRequester.safeRequestFocus()
+                                            true
+                                        }
+                                        Key.DirectionDown -> {
+                                            availableTabFocusRequester.safeRequestFocus()
+                                            true
+                                        }
+                                        Key.DirectionCenter,
+                                        Key.Enter,
+                                        Key.NumPadEnter,
+                                        Key.Spacebar -> {
+                                            metaDetail?.let { dt ->
+                                                scope.launch {
+                                                    if (isMediaInWatchlist) {
+                                                        repository.removeFromWatchlist(dt.id)
+                                                        android.widget.Toast.makeText(context, "Removed from Watchlist", android.widget.Toast.LENGTH_SHORT).show()
+                                                    } else {
+                                                        val watchItem = com.mystream.app.data.model.WatchlistItem(
+                                                            id = dt.id,
+                                                            imdbId = dt.id,
+                                                            title = dt.name,
+                                                            subtitle = dt.genres.firstOrNull() ?: dt.year,
+                                                            posterUrl = dt.poster,
+                                                            backdropUrl = dt.background,
+                                                            type = dt.type,
+                                                            dateAddedMs = System.currentTimeMillis()
+                                                        )
+                                                        repository.addToWatchlist(watchItem)
+                                                        android.widget.Toast.makeText(context, "Added to Watchlist!", android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            }
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                }
+                                .clickable(interactionSource = watchlistInteraction, indication = null) {
+                                    metaDetail?.let { dt ->
+                                        scope.launch {
+                                            if (isMediaInWatchlist) {
+                                                repository.removeFromWatchlist(dt.id)
+                                                android.widget.Toast.makeText(context, "Removed from Watchlist", android.widget.Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                val watchItem = com.mystream.app.data.model.WatchlistItem(
+                                                    id = dt.id,
+                                                    imdbId = dt.id,
+                                                    title = dt.name,
+                                                    subtitle = dt.genres.firstOrNull() ?: dt.year,
+                                                    posterUrl = dt.poster,
+                                                    backdropUrl = dt.background,
+                                                    type = dt.type,
+                                                    dateAddedMs = System.currentTimeMillis()
+                                                )
+                                                repository.addToWatchlist(watchItem)
+                                                android.widget.Toast.makeText(context, "Added to Watchlist!", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                                .padding(8.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = if (isMediaInWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                                 contentDescription = "Watchlist",
-                                tint = if (isMediaInWatchlist) SecondaryCyan else Color.White
+                                tint = if (isWatchlistFocused) FocusRingOrange else if (isMediaInWatchlist) SecondaryCyan else Color.White
                             )
                         }
                     }
@@ -668,11 +742,22 @@ fun DetailScreen(
                                     if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                                     when (keyEvent.key) {
                                         Key.DirectionRight -> {
-                                            allTorrentsTabFocusRequester.requestFocus()
+                                            allTorrentsTabFocusRequester.safeRequestFocus()
+                                            true
+                                        }
+                                        Key.DirectionLeft -> {
                                             true
                                         }
                                         Key.DirectionDown -> {
-                                            firstStreamFocusRequester.requestFocus()
+                                            if (streams.isNotEmpty()) {
+                                                firstStreamFocusRequester.safeRequestFocus()
+                                            } else if (allTorrents.isNotEmpty()) {
+                                                firstTorrentFocusRequester.safeRequestFocus()
+                                            }
+                                            true
+                                        }
+                                        Key.DirectionUp -> {
+                                            backButtonFocusRequester.safeRequestFocus()
                                             true
                                         }
                                         Key.DirectionCenter,
@@ -726,11 +811,22 @@ fun DetailScreen(
                                     if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                                     when (keyEvent.key) {
                                         Key.DirectionLeft -> {
-                                            availableTabFocusRequester.requestFocus()
+                                            availableTabFocusRequester.safeRequestFocus()
+                                            true
+                                        }
+                                        Key.DirectionRight -> {
                                             true
                                         }
                                         Key.DirectionDown -> {
-                                            firstTorrentFocusRequester.requestFocus()
+                                            if (selectedStreamTab == 1 && allTorrents.isNotEmpty()) {
+                                                firstTorrentFocusRequester.safeRequestFocus()
+                                            } else if (streams.isNotEmpty()) {
+                                                firstStreamFocusRequester.safeRequestFocus()
+                                            }
+                                            true
+                                        }
+                                        Key.DirectionUp -> {
+                                            watchlistButtonFocusRequester.safeRequestFocus()
                                             true
                                         }
                                         Key.DirectionCenter,
@@ -911,6 +1007,14 @@ fun DetailScreen(
                                     stream = stream,
                                     isResolving = isResolvingThis,
                                     externalFocusRequester = if (index == 0) firstStreamFocusRequester else null,
+                                    modifier = if (index == 0) {
+                                        Modifier.onPreviewKeyEvent { keyEvent ->
+                                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionUp) {
+                                                availableTabFocusRequester.safeRequestFocus()
+                                                true
+                                            } else false
+                                        }
+                                    } else Modifier,
                                     onClick = { launchStream(restartFromBeginning = false) },
                                     onRestart = { launchStream(restartFromBeginning = true) },
                                     onWatchlistToggle = {
@@ -1088,6 +1192,14 @@ fun DetailScreen(
                                     stream = torr,
                                     isResolving = isResolvingThis,
                                     externalFocusRequester = if (index == 0) firstTorrentFocusRequester else null,
+                                    modifier = if (index == 0) {
+                                        Modifier.onPreviewKeyEvent { keyEvent ->
+                                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionUp) {
+                                                availableTabFocusRequester.safeRequestFocus()
+                                                true
+                                            } else false
+                                        }
+                                    } else Modifier,
                                     onClick = {
                                         torr.infoHash?.let { hash ->
                                             p2pRestartFromBeginning = false

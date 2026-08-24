@@ -30,6 +30,8 @@ class MyStreamApplication : Application(), SingletonImageLoader.Factory {
         playerManager = MyStreamPlayerManager(this, sourcesRepository = sourcesRepository)
     }
 
+    private var imageLoaderInstance: ImageLoader? = null
+
     override fun newImageLoader(context: PlatformContext): ImageLoader {
         val okHttpClient = OkHttpClient.Builder()
             .dns(SystemFallbackDns)
@@ -39,23 +41,40 @@ class MyStreamApplication : Application(), SingletonImageLoader.Factory {
             .followSslRedirects(true)
             .build()
 
-        return ImageLoader.Builder(context)
+        val loader = ImageLoader.Builder(context)
             .components {
                 add(OkHttpNetworkFetcherFactory(callFactory = { okHttpClient }))
             }
             .memoryCache {
                 MemoryCache.Builder()
-                    .maxSizePercent(context, 0.25)
+                    .maxSizePercent(context, 0.15) // Lean 15% memory limit for TV devices
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("image_cache").toOkioPath())
-                    .maxSizeBytes(100L * 1024 * 1024) // 100MB disk cache
+                    .maxSizeBytes(60L * 1024 * 1024) // 60MB disk cache
                     .build()
             }
             .crossfade(true)
             .build()
+
+        imageLoaderInstance = loader
+        return loader
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_BACKGROUND) {
+            imageLoaderInstance?.memoryCache?.clear()
+        } else if (level >= TRIM_MEMORY_RUNNING_LOW) {
+            imageLoaderInstance?.memoryCache?.trimToSize((imageLoaderInstance?.memoryCache?.maxSize ?: 0) / 2)
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        imageLoaderInstance?.memoryCache?.clear()
     }
 
     override fun onTerminate() {

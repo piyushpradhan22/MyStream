@@ -52,6 +52,11 @@ import com.mystream.app.ui.theme.TextSecondary
 import androidx.compose.foundation.border
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 
 @Composable
 fun HeroBanner(
@@ -59,6 +64,7 @@ fun HeroBanner(
     onPlayClick: () -> Unit,
     modifier: Modifier = Modifier,
     playFocusRequester: FocusRequester? = null,
+    onNavigateDown: (() -> Unit)? = null,
     onDetailsClick: (() -> Unit)? = null,
     height: Int = 340
 ) {
@@ -201,6 +207,12 @@ fun HeroBanner(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .then(if (playFocusRequester != null) Modifier.focusRequester(playFocusRequester) else Modifier)
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown && onNavigateDown != null) {
+                                onNavigateDown()
+                                true
+                            } else false
+                        }
                         .then(
                             if (isPlayFocused) Modifier.border(2.5.dp, FocusRingOrange, RoundedCornerShape(10.dp))
                             else Modifier

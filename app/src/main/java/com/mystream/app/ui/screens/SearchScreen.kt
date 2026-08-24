@@ -1,6 +1,7 @@
 package com.mystream.app.ui.screens
 
 import androidx.compose.foundation.background
+import com.mystream.app.ui.utils.safeRequestFocus
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -79,6 +80,13 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+object SearchStateHolder {
+    var query: String = ""
+    var rawResults: List<StremioMetaPreview> = emptyList()
+    var selectedFilter: String = "All"
+    var trendingItems: List<StremioMetaPreview> = emptyList()
+}
+
 @Composable
 fun SearchScreen(
     repository: SourcesRepository,
@@ -86,10 +94,11 @@ fun SearchScreen(
     onNavigateToDetail: (type: String, id: String) -> Unit,
     initialQuery: String = ""
 ) {
-    var query by remember { mutableStateOf(initialQuery) }
-    var rawResults by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var trendingItems by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var selectedFilter by remember { mutableStateOf("All") }
+    val initialSearchQuery = if (initialQuery.isNotBlank()) initialQuery else SearchStateHolder.query
+    var query by remember { mutableStateOf(initialSearchQuery) }
+    var rawResults by remember { mutableStateOf(if (initialQuery.isNotBlank() && initialQuery != SearchStateHolder.query) emptyList() else SearchStateHolder.rawResults) }
+    var trendingItems by remember { mutableStateOf(SearchStateHolder.trendingItems) }
+    var selectedFilter by remember { mutableStateOf(SearchStateHolder.selectedFilter) }
     var isSearching by remember { mutableStateOf(false) }
     var isSearchEditing by remember { mutableStateOf(false) }
 
@@ -102,12 +111,19 @@ fun SearchScreen(
     val isImeVisible = WindowInsets.ime.getBottom(density) > 0
     val isEditing = isImeVisible || isSearchEditing
 
+    LaunchedEffect(query, rawResults, selectedFilter, trendingItems) {
+        SearchStateHolder.query = query
+        SearchStateHolder.rawResults = rawResults
+        SearchStateHolder.selectedFilter = selectedFilter
+        SearchStateHolder.trendingItems = trendingItems
+    }
+
     fun enterSearchEditingMode() {
         isSearchEditing = true
         scope.launch {
             repeat(3) {
                 if (!isSearchFieldFocused) {
-                    searchFocusRequester.requestFocus()
+                    searchFocusRequester.safeRequestFocus()
                 }
                 delay(40)
             }
@@ -121,19 +137,20 @@ fun SearchScreen(
     }
 
     LaunchedEffect(Unit) {
-        delay(120)
-        try {
-            searchFocusRequester.requestFocus()
-        } catch (_: Exception) {
+        if (query.isBlank()) {
+            delay(120)
+            searchFocusRequester.safeRequestFocus()
         }
     }
 
     LaunchedEffect(Unit) {
-        try {
-            val movies = repository.fetchCatalog("movie", "top", skip = 0).metas
-            val series = repository.fetchCatalog("series", "top", skip = 0).metas
-            trendingItems = (movies + series).distinctBy { it.id }
-        } catch (_: Exception) {
+        if (trendingItems.isEmpty()) {
+            try {
+                val movies = repository.fetchCatalog("movie", "top", skip = 0).metas
+                val series = repository.fetchCatalog("series", "top", skip = 0).metas
+                trendingItems = (movies + series).distinctBy { it.id }
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -252,7 +269,7 @@ fun SearchScreen(
                             IconButton(onClick = {
                                 query = ""
                                 rawResults = emptyList()
-                                searchFocusRequester.requestFocus()
+                                searchFocusRequester.safeRequestFocus()
                             }) {
                                 Icon(
                                     imageVector = Icons.Default.Clear,

@@ -312,11 +312,6 @@ class PikPakStreamResolver(
                     }
                 }
                 cachedJobs.joinAll()
-
-                // If all 4 qualities were resolved from cache, complete flow
-                if (accumulatedStreams.size >= 4) {
-                    return@channelFlow
-                }
             }
         }
 
@@ -339,10 +334,10 @@ class PikPakStreamResolver(
             }
         }
 
-        // 4. Group remaining missing quality tiers
+        // 4. Group remaining missing quality tiers (4K, 1080p HDR, 1080p 3D, 1080p, 720p, etc.)
         val torrentsByQuality = currentTorrents.groupBy { torr ->
             torr.name?.replace("Torrentio\n", "")?.trim() ?: "HD"
-        }.entries.filter { !resolvedQualities.contains(it.key) }.take(4)
+        }.entries.filter { !resolvedQualities.contains(it.key) }
 
         // 5. Fetch fresh random unused accounts from DB
         var accounts = if (postgresUrl.isNotBlank()) {
@@ -357,9 +352,9 @@ class PikPakStreamResolver(
         }
 
         // 6. Launch ALL remaining quality tier workers concurrently and EMIT 1-BY-1 INSTANTLY!
-        val workers = torrentsByQuality.mapIndexed { index, (quality, candidates) ->
+        val workers = torrentsByQuality.mapIndexed { _, (quality, candidates) ->
             launch(Dispatchers.IO) {
-                val assignedAccounts = accounts.drop(index * 4).take(4).ifEmpty { accounts }
+                val assignedAccounts = accounts.ifEmpty { listOfNotNull(config.primaryAccount) }
                 var qualityResolved = false
 
                 // Prioritize Hindi audio candidates first within quality tier!
@@ -383,7 +378,8 @@ class PikPakStreamResolver(
                                 continue // try next account if login failed
                             }
 
-                            val token = pikpakClient.cachedAccessToken.orEmpty()
+                            val authData = authRes.getOrNull()
+                            val token = authData?.accessToken ?: pikpakClient.cachedAccessToken.orEmpty()
                             val fileRes = pikpakClient.addMagnetAndGetResolvedFile(magnetUrl = magnet, token = token)
                             val resolvedFile = fileRes.getOrNull()
 

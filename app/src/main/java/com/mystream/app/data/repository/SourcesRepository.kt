@@ -439,8 +439,8 @@ class SourcesRepository(
         pikpakResolver.streamPikPakStreams(type, imdbId).collect { list ->
             if (list.isNotEmpty()) {
                 persistStreams(cacheKey, list, configuredTtl)
+                emit(list)
             }
-            emit(list)
         }
     }
 

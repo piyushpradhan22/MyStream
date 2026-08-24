@@ -168,7 +168,17 @@ data class StremioStreamSource(
     val hasHindiAudio: Boolean
         get() {
             val text = (name.orEmpty() + " " + title.orEmpty()).uppercase()
-            return text.contains("HINDI") || text.contains("HIN") || text.contains("DUAL") || text.contains("MULTI") || text.contains("🇮🇳")
+            return text.contains("🇮🇳") ||
+                   text.contains("HINDI") ||
+                   text.contains("HIN-") ||
+                   text.contains("-HIN") ||
+                   text.contains("[HIN") ||
+                   text.contains("(HIN") ||
+                   text.contains(" HIN ") ||
+                   text.contains("[HI]") ||
+                   text.contains("(HI)") ||
+                   text.contains("BOLLYWOOD") ||
+                   text.contains("DESI")
         }
 
     val fileSize: String?
@@ -297,7 +307,8 @@ data class PlayerTrackInfo(
     val isSelected: Boolean,
     val mimeType: String? = null,
     val channels: Int = 0,
-    val bitrate: Int = 0
+    val bitrate: Int = 0,
+    val isSupported: Boolean = true
 )
 
 // --- Playback State & Media Item ---

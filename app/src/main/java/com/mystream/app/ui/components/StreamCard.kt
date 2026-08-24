@@ -56,6 +56,7 @@ import com.mystream.app.ui.theme.SurfaceDark
 import com.mystream.app.ui.theme.TextMuted
 import com.mystream.app.ui.theme.TextPrimary
 import com.mystream.app.ui.theme.TextSecondary
+import com.mystream.app.ui.utils.safeRequestFocus
 
 @Composable
 fun StreamCard(
@@ -248,16 +249,16 @@ fun StreamCard(
                                     if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                                     when (keyEvent.key) {
                                         Key.DirectionLeft -> {
-                                            cardFocusRequester.requestFocus()
+                                            cardFocusRequester.safeRequestFocus()
                                             true
                                         }
 
                                         Key.DirectionRight -> {
                                             if (onWatchlistToggle != null) {
-                                                watchlistFocusRequester.requestFocus()
+                                                watchlistFocusRequester.safeRequestFocus()
                                                 true
                                             } else if (onRestart != null) {
-                                                restartFocusRequester.requestFocus()
+                                                restartFocusRequester.safeRequestFocus()
                                                 true
                                             } else {
                                                 false
@@ -353,9 +354,9 @@ fun StreamCard(
                                     when (keyEvent.key) {
                                         Key.DirectionLeft -> {
                                             if (onMagnetStream != null && !isResolving) {
-                                                magnetFocusRequester.requestFocus()
+                                                magnetFocusRequester.safeRequestFocus()
                                             } else {
-                                                cardFocusRequester.requestFocus()
+                                                cardFocusRequester.safeRequestFocus()
                                             }
                                             true
                                         }

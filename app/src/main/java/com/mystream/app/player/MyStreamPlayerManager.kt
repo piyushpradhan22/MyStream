@@ -70,7 +70,8 @@ class MyStreamPlayerManager(
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .setSelectUndeterminedTextLanguage(false)
                 .setExceedVideoConstraintsIfNecessary(true)
-                .setExceedRendererCapabilitiesIfNecessary(true)
+                .setExceedRendererCapabilitiesIfNecessary(false) // Never force-pick unsupported audio tracks (e.g. TrueHD 7.1)
+                .setExceedAudioConstraintsIfNecessary(false)
                 .setAllowVideoMixedMimeTypeAdaptiveness(true)
                 .setAllowVideoNonSeamlessAdaptiveness(true)
                 .setMaxVideoBitrate(Int.MAX_VALUE)
@@ -80,39 +81,33 @@ class MyStreamPlayerManager(
     }
 
     private val renderersFactory = DefaultRenderersFactory(context).apply {
-        // PREFER mode: use extension decoders (e.g. libvpx, ffmpeg) before software, hardware last resort
-        setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-        // Allow fallback to next decoder if primary can't handle the stream
+        setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         setEnableDecoderFallback(true)
-        // Use DEFAULT selector — lets hardware (c2.qcom.hevc etc.) + software all compete
         setMediaCodecSelector(MediaCodecSelector.DEFAULT)
     }
 
-    private val okHttpClient = OkHttpClient.Builder()
-        .dns(com.mystream.app.data.api.SystemFallbackDns)
-        .connectTimeout(25, TimeUnit.SECONDS)
-        .readTimeout(35, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .followSslRedirects(true)
-        .build()
-
-    private val dataSourceFactory = OkHttpDataSource.Factory(okHttpClient)
+    private val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
         .setUserAgent("ANDROID-com.pikcloud.pikpak/1.47.1")
+        .setAllowCrossProtocolRedirects(true)
+        .setConnectTimeoutMs(25_000)
+        .setReadTimeoutMs(35_000)
+        .setKeepPostFor302Redirects(true)
         .setTransferListener(bandwidthMeter)
+
+    private val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
 
     private val mediaSourceFactory = DefaultMediaSourceFactory(context)
         .setDataSourceFactory(dataSourceFactory)
         .setLoadErrorHandlingPolicy(object : DefaultLoadErrorHandlingPolicy() {
             override fun getMinimumLoadableRetryCount(dataType: Int): Int {
-                // Localhost torrent streaming can legitimately return transient 5xx/timeouts while buffering pieces.
-                return 10
+                return 12
             }
 
             override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
                 val base = super.getRetryDelayMsFor(loadErrorInfo)
                 return when {
-                    base == C.TIME_UNSET -> 750L
-                    else -> base.coerceIn(500L, 4000L)
+                    base == C.TIME_UNSET -> 1000L
+                    else -> base.coerceIn(500L, 5000L)
                 }
             }
         })
@@ -400,6 +395,7 @@ class MyStreamPlayerManager(
                             2 -> "Stereo"
                             else -> "${format.channelCount}ch"
                         }
+                        val isSupported = trackGroup.isTrackSupported(i)
                         val title = format.label ?: "$language ($channels)"
                         audioList.add(
                             PlayerTrackInfo(
@@ -411,7 +407,8 @@ class MyStreamPlayerManager(
                                 isSelected = isSelected,
                                 mimeType = format.sampleMimeType,
                                 channels = format.channelCount,
-                                bitrate = format.bitrate
+                                bitrate = format.bitrate,
+                                isSupported = isSupported
                             )
                         )
                     }
@@ -426,7 +423,8 @@ class MyStreamPlayerManager(
                                 label = title,
                                 language = format.language,
                                 isSelected = isSelected,
-                                mimeType = format.sampleMimeType
+                                mimeType = format.sampleMimeType,
+                                isSupported = true
                             )
                         )
                     }
@@ -449,6 +447,10 @@ class MyStreamPlayerManager(
     }
 
     fun selectAudioTrack(trackInfo: PlayerTrackInfo) {
+        if (!trackInfo.isSupported) {
+            Log.w(TAG, "Audio track '${trackInfo.label}' (${trackInfo.mimeType}) is unsupported by device decoder hardware.")
+            return
+        }
         val tracks = player.currentTracks
         val group = tracks.groups.getOrNull(trackInfo.groupIndex)?.mediaTrackGroup ?: return
         trackSelector.parameters = trackSelector.parameters

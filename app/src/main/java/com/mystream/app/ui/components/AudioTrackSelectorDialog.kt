@@ -1,7 +1,11 @@
 package com.mystream.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +27,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -103,15 +109,39 @@ fun AudioTrackSelectorDialog(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(tracks) { track ->
+                            val itemInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                            val isFocused by itemInteraction.collectIsFocusedAsState()
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(if (track.isSelected) PrimaryNeon.copy(alpha = 0.2f) else SurfaceCard)
-                                    .clickable {
-                                        onSelectTrack(track)
-                                        onDismiss()
-                                    }
+                                    .background(
+                                        when {
+                                            isFocused -> com.mystream.app.ui.theme.FocusRingOrange.copy(alpha = 0.25f)
+                                            track.isSelected -> PrimaryNeon.copy(alpha = 0.2f)
+                                            else -> SurfaceCard
+                                        }
+                                    )
+                                    .then(
+                                        if (isFocused) Modifier.border(
+                                            2.dp,
+                                            com.mystream.app.ui.theme.FocusRingOrange,
+                                            RoundedCornerShape(10.dp)
+                                        ) else Modifier
+                                    )
+                                    .then(
+                                        if (track.isSupported) {
+                                            Modifier
+                                                .focusable(interactionSource = itemInteraction)
+                                                .clickable(interactionSource = itemInteraction, indication = null) {
+                                                    onSelectTrack(track)
+                                                    onDismiss()
+                                                }
+                                        } else {
+                                            Modifier.focusable(false)
+                                        }
+                                    )
                                     .padding(horizontal = 14.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
@@ -119,16 +149,34 @@ fun AudioTrackSelectorDialog(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = track.label,
-                                        color = if (track.isSelected) PrimaryNeon else TextPrimary,
+                                        color = when {
+                                            !track.isSupported -> TextMuted
+                                            isFocused -> com.mystream.app.ui.theme.FocusRingOrange
+                                            track.isSelected -> PrimaryNeon
+                                            else -> TextPrimary
+                                        },
                                         fontSize = 14.sp,
-                                        fontWeight = if (track.isSelected) FontWeight.Bold else FontWeight.Normal
+                                        fontWeight = if (track.isSelected || isFocused) FontWeight.Bold else FontWeight.Normal
                                     )
-                                    if (!track.mimeType.isNullOrBlank()) {
-                                        Text(
-                                            text = track.mimeType,
-                                            color = TextMuted,
-                                            fontSize = 11.sp
-                                        )
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (!track.mimeType.isNullOrBlank()) {
+                                            Text(
+                                                text = track.mimeType,
+                                                color = TextMuted,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                        if (!track.isSupported) {
+                                            Text(
+                                                text = "⚠️ Unsupported on this device",
+                                                color = androidx.compose.ui.graphics.Color(0xFFFF6B6B),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
                                     }
                                 }
 
@@ -136,7 +184,7 @@ fun AudioTrackSelectorDialog(
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = "Selected",
-                                        tint = PrimaryNeon,
+                                        tint = if (isFocused) com.mystream.app.ui.theme.FocusRingOrange else PrimaryNeon,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }

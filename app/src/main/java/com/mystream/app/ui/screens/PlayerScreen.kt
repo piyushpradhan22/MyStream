@@ -1,6 +1,7 @@
 package com.mystream.app.ui.screens
 
 import android.app.Activity
+import com.mystream.app.ui.utils.safeRequestFocus
 import android.content.Context
 import android.media.AudioManager
 import android.view.WindowManager
@@ -334,15 +335,15 @@ fun PlayerScreen(
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
             Key.DirectionLeft -> {
-                rewindFocusRequester.requestFocus()
+                rewindFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionRight -> {
-                forwardFocusRequester.requestFocus()
+                forwardFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionDown -> {
-                seekbarFocusRequester.requestFocus()
+                seekbarFocusRequester.safeRequestFocus()
                 true
             }
             else -> false
@@ -353,11 +354,11 @@ fun PlayerScreen(
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
             Key.DirectionRight -> {
-                playPauseFocusRequester.requestFocus()
+                playPauseFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionDown -> {
-                seekbarFocusRequester.requestFocus()
+                seekbarFocusRequester.safeRequestFocus()
                 true
             }
             else -> false
@@ -368,11 +369,11 @@ fun PlayerScreen(
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
             Key.DirectionLeft -> {
-                playPauseFocusRequester.requestFocus()
+                playPauseFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionDown -> {
-                seekbarFocusRequester.requestFocus()
+                seekbarFocusRequester.safeRequestFocus()
                 true
             }
             else -> false
@@ -384,12 +385,12 @@ fun PlayerScreen(
         return when (event.key) {
             Key.DirectionUp -> {
                 commitPendingSeekNow()
-                playPauseFocusRequester.requestFocus()
+                playPauseFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionDown -> {
                 commitPendingSeekNow()
-                audioFocusRequester.requestFocus()
+                audioFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionLeft -> {
@@ -418,11 +419,11 @@ fun PlayerScreen(
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
             Key.DirectionRight -> {
-                subtitleFocusRequester.requestFocus()
+                subtitleFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionUp -> {
-                seekbarFocusRequester.requestFocus()
+                seekbarFocusRequester.safeRequestFocus()
                 true
             }
             else -> false
@@ -433,15 +434,15 @@ fun PlayerScreen(
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
             Key.DirectionLeft -> {
-                audioFocusRequester.requestFocus()
+                audioFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionRight -> {
-                aspectFocusRequester.requestFocus()
+                aspectFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionUp -> {
-                seekbarFocusRequester.requestFocus()
+                seekbarFocusRequester.safeRequestFocus()
                 true
             }
             else -> false
@@ -452,15 +453,15 @@ fun PlayerScreen(
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
             Key.DirectionLeft -> {
-                subtitleFocusRequester.requestFocus()
+                subtitleFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionRight -> {
-                speedFocusRequester.requestFocus()
+                speedFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionUp -> {
-                seekbarFocusRequester.requestFocus()
+                seekbarFocusRequester.safeRequestFocus()
                 true
             }
             else -> false
@@ -471,15 +472,15 @@ fun PlayerScreen(
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
             Key.DirectionLeft -> {
-                aspectFocusRequester.requestFocus()
+                aspectFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionRight -> {
-                fullscreenFocusRequester.requestFocus()
+                fullscreenFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionUp -> {
-                seekbarFocusRequester.requestFocus()
+                seekbarFocusRequester.safeRequestFocus()
                 true
             }
             else -> false
@@ -490,15 +491,15 @@ fun PlayerScreen(
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
             Key.DirectionLeft -> {
-                speedFocusRequester.requestFocus()
+                speedFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionRight -> {
-                lockFocusRequester.requestFocus()
+                lockFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionUp -> {
-                seekbarFocusRequester.requestFocus()
+                seekbarFocusRequester.safeRequestFocus()
                 true
             }
             else -> false
@@ -509,11 +510,11 @@ fun PlayerScreen(
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
             Key.DirectionLeft -> {
-                fullscreenFocusRequester.requestFocus()
+                fullscreenFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionUp -> {
-                seekbarFocusRequester.requestFocus()
+                seekbarFocusRequester.safeRequestFocus()
                 true
             }
             else -> false
@@ -775,7 +776,7 @@ fun PlayerScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = "The selected stream format exceeds the emulator/device hardware decoder capabilities.\nPlease select a 1080p or 720p stream.",
+                        text = errorMessage ?: "Unable to stream this media. Please retry or pick another stream.",
                         color = TextSecondary,
                         fontSize = 14.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -783,19 +784,44 @@ fun PlayerScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    val errorBtnInteraction = remember { MutableInteractionSource() }
-                    val isErrorBtnFocused by errorBtnInteraction.collectIsFocusedAsState()
-
-                    androidx.compose.material3.Button(
-                        onClick = onBack,
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                            containerColor = if (isErrorBtnFocused) FocusRingOrange else PrimaryNeon
-                        ),
-                        modifier = Modifier
-                            .focusRequester(errorButtonFocusRequester)
-                            .focusable(interactionSource = errorBtnInteraction)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = "Choose Another Stream", color = Color.White, fontWeight = FontWeight.Bold)
+                        val retryBtnInteraction = remember { MutableInteractionSource() }
+                        val isRetryBtnFocused by retryBtnInteraction.collectIsFocusedAsState()
+
+                        androidx.compose.material3.Button(
+                            onClick = {
+                                playerManager.playMedia(item, currentPosition)
+                            },
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = if (isRetryBtnFocused) FocusRingOrange else PrimaryNeon
+                            ),
+                            modifier = Modifier
+                                .focusRequester(errorButtonFocusRequester)
+                                .focusable(interactionSource = retryBtnInteraction)
+                        ) {
+                            Text(text = "Retry", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+
+                        val errorBtnInteraction = remember { MutableInteractionSource() }
+                        val isErrorBtnFocused by errorBtnInteraction.collectIsFocusedAsState()
+
+                        androidx.compose.material3.OutlinedButton(
+                            onClick = onBack,
+                            colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (isErrorBtnFocused) FocusRingOrange.copy(alpha = 0.2f) else Color.Transparent
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(
+                                if (isErrorBtnFocused) 2.dp else 1.dp,
+                                if (isErrorBtnFocused) FocusRingOrange else Color(0x66FFFFFF)
+                            ),
+                            modifier = Modifier
+                                .focusable(interactionSource = errorBtnInteraction)
+                        ) {
+                            Text(text = "Choose Another Stream", color = Color.White)
+                        }
                     }
                 }
             }

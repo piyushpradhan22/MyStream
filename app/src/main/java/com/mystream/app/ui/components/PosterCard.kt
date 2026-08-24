@@ -70,14 +70,12 @@ fun PosterCard(
     onClearClick: (() -> Unit)? = null
 ) {
     val cardFocusRequester = remember { FocusRequester() }
-    val clearFocusRequester = remember { FocusRequester() }
 
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
     val isHovered by interactionSource.collectIsHoveredAsState()
 
     val clearInteractionSource = remember { MutableInteractionSource() }
-    val isClearFocused by clearInteractionSource.collectIsFocusedAsState()
 
     val scale by animateFloatAsState(
         targetValue = if (isFocused || isHovered) 1.08f else 1.0f,
@@ -98,21 +96,6 @@ fun PosterCard(
             .scale(scale)
             .focusRequester(cardFocusRequester)
             .focusable(interactionSource = interactionSource)
-            .onPreviewKeyEvent { keyEvent ->
-                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when (keyEvent.key) {
-                    Key.DirectionRight -> {
-                        if (onClearClick != null) {
-                            clearFocusRequester.requestFocus()
-                            true
-                        } else {
-                            false
-                        }
-                    }
-
-                    else -> false
-                }
-            }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -156,43 +139,18 @@ fun PosterCard(
                 }
             }
 
-            // Clear from Continue Watching Button
+            // Clear from Continue Watching / Watchlist Button (touch-enabled, non-D-pad-stealing)
             if (onClearClick != null) {
                 Box(
                     modifier = Modifier
-                        .focusRequester(clearFocusRequester)
-                        .focusable(interactionSource = clearInteractionSource)
-                        .onPreviewKeyEvent { keyEvent ->
-                            val isSelectKey = keyEvent.key == Key.DirectionCenter ||
-                                keyEvent.key == Key.Enter ||
-                                keyEvent.key == Key.NumPadEnter ||
-                                keyEvent.key == Key.Spacebar
-
-                            if (isSelectKey) {
-                                if (keyEvent.type == KeyEventType.KeyUp) {
-                                    onClearClick()
-                                }
-                                return@onPreviewKeyEvent true
-                            }
-
-                            if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                            when (keyEvent.key) {
-                                Key.DirectionLeft -> {
-                                    cardFocusRequester.requestFocus()
-                                    true
-                                }
-
-                                else -> false
-                            }
-                        }
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
                         .size(24.dp)
                         .clip(CircleShape)
-                        .background(if (isClearFocused) PrimaryNeon.copy(alpha = 0.35f) else Color(0xD9000000))
+                        .background(Color(0xD9000000))
                         .border(
-                            if (isClearFocused) 2.dp else 1.dp,
-                            if (isClearFocused) PrimaryNeon else Color(0x66FFFFFF),
+                            1.dp,
+                            Color(0x66FFFFFF),
                             CircleShape
                         )
                         .clickable(interactionSource = clearInteractionSource, indication = null) { onClearClick() },
@@ -200,8 +158,8 @@ fun PosterCard(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Remove from Continue Watching",
-                        tint = if (isClearFocused) Color.White else Color.White,
+                        contentDescription = "Remove item",
+                        tint = Color.White,
                         modifier = Modifier.size(13.dp)
                     )
                 }
