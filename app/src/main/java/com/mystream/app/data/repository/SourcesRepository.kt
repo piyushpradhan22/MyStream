@@ -17,8 +17,13 @@ import com.mystream.app.data.resolver.PikPakStreamResolver
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import com.mystream.app.data.model.ImdbIndianItem
 import java.util.UUID
 
 private val Context.dataStore by preferencesDataStore(name = "mystream_settings")
@@ -307,6 +312,79 @@ class SourcesRepository(
         }
     }
 
+    private var cachedIndianCatalog: Map<String, List<ImdbIndianItem>>? = null
+    private val indianCatalogDiskCacheFile by lazy { java.io.File(context.cacheDir, "imdb_indian_data.json") }
+    private val INDIAN_CATALOG_URL = "https://raw.githubusercontent.com/piyushpradhan22/imdb-indian/refs/heads/master/data.json"
+
+    suspend fun loadIndianCatalogData(forceRefresh: Boolean = false): Map<String, List<ImdbIndianItem>> = withContext(Dispatchers.IO) {
+        cachedIndianCatalog?.let { if (!forceRefresh) return@withContext it }
+
+        // Try reading disk cache if recent (< 24 hours) and not forceRefresh
+        if (!forceRefresh && indianCatalogDiskCacheFile.exists() && System.currentTimeMillis() - indianCatalogDiskCacheFile.lastModified() < 24 * 3600 * 1000L) {
+            try {
+                val text = indianCatalogDiskCacheFile.readText()
+                if (text.isNotBlank()) {
+                    val parsed = json.decodeFromString<Map<String, List<ImdbIndianItem>>>(text)
+                    cachedIndianCatalog = parsed
+                    return@withContext parsed
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("SourcesRepository", "Failed to parse local Indian catalog cache", e)
+            }
+        }
+
+        // Fetch from GitHub raw
+        try {
+            val req = Request.Builder()
+                .url(INDIAN_CATALOG_URL)
+                .header("Cache-Control", "no-cache")
+                .build()
+            val client = OkHttpClient.Builder()
+                .dns(com.mystream.app.data.api.SystemFallbackDns)
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            val response = client.newCall(req).execute()
+            if (response.isSuccessful) {
+                val body = response.body?.string() ?: ""
+                if (body.isNotBlank()) {
+                    try {
+                        indianCatalogDiskCacheFile.writeText(body)
+                    } catch (_: Exception) {}
+                    val parsed = json.decodeFromString<Map<String, List<ImdbIndianItem>>>(body)
+                    cachedIndianCatalog = parsed
+                    return@withContext parsed
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("SourcesRepository", "Failed to fetch Indian catalog from network", e)
+        }
+
+        // Fallback to disk cache if network failed
+        if (indianCatalogDiskCacheFile.exists()) {
+            try {
+                val text = indianCatalogDiskCacheFile.readText()
+                val parsed = json.decodeFromString<Map<String, List<ImdbIndianItem>>>(text)
+                cachedIndianCatalog = parsed
+                return@withContext parsed
+            } catch (_: Exception) {}
+        }
+
+        emptyMap()
+    }
+
+    suspend fun fetchIndianCatalog(
+        category: String = "Top Rated",
+        skip: Int = 0,
+        limit: Int = 20
+    ): StremioCatalogResponse {
+        val data = loadIndianCatalogData()
+        val key = data.keys.firstOrNull { it.equals(category, ignoreCase = true) } ?: "Top Rated"
+        val items = data[key] ?: emptyList()
+        val paged = items.drop(skip).take(limit).map { it.toStremioMetaPreview() }
+        return StremioCatalogResponse(metas = paged)
+    }
+
     suspend fun fetchCatalog(
         type: String,
         catalogId: String = "top",
@@ -315,6 +393,10 @@ class SourcesRepository(
         skip: Int = 0,
         sourceUrl: String = DEFAULT_CATALOG_SOURCES.first().baseUrl
     ): StremioCatalogResponse {
+        if (catalogId == "imdb-indian" || type == "indian") {
+            val category = genre?.takeIf { it.isNotBlank() } ?: "Top Rated"
+            return fetchIndianCatalog(category = category, skip = skip, limit = 20)
+        }
         return apiClient.getCatalog(
             baseUrl = sourceUrl,
             type = type,

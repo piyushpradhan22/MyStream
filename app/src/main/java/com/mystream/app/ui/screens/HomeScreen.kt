@@ -113,6 +113,15 @@ fun HomeScreen(
     val continueWatchingFirstItemFR = remember { FocusRequester() }
     val watchlistFirstItemFR = remember { FocusRequester() }
 
+    val rowIndian1FirstItemFR = remember { FocusRequester() }
+    val rowIndian1SeeMoreFR = remember { FocusRequester() }
+
+    val rowIndian2FirstItemFR = remember { FocusRequester() }
+    val rowIndian2SeeMoreFR = remember { FocusRequester() }
+
+    val rowIndian3FirstItemFR = remember { FocusRequester() }
+    val rowIndian3SeeMoreFR = remember { FocusRequester() }
+
     val row1FirstItemFR = remember { FocusRequester() }
     val row1SeeMoreFR = remember { FocusRequester() }
 
@@ -127,6 +136,10 @@ fun HomeScreen(
 
     val row5FirstItemFR = remember { FocusRequester() }
     val row5SeeMoreFR = remember { FocusRequester() }
+
+    var indianTopRated by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
+    var indianOttHits by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
+    var indianHotstarZee5 by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
 
     var topMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
     var topSeries by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
@@ -194,9 +207,39 @@ fun HomeScreen(
             coroutineScope {
                 launch(Dispatchers.IO) {
                     try {
+                        val indianRes = repository.fetchIndianCatalog("Top Rated", skip = 0, limit = 20)
+                        indianTopRated = indianRes.metas
+                        if (featuredItem == null && indianRes.metas.isNotEmpty()) {
+                            featuredItem = indianRes.metas.firstOrNull()
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("HomeScreen", "Error loading Indian top rated", e)
+                    }
+                }
+
+                launch(Dispatchers.IO) {
+                    try {
+                        val netflixRes = repository.fetchIndianCatalog("Netflix India", skip = 0, limit = 20)
+                        indianOttHits = netflixRes.metas
+                    } catch (e: Exception) {
+                        android.util.Log.e("HomeScreen", "Error loading Indian Netflix", e)
+                    }
+                }
+
+                launch(Dispatchers.IO) {
+                    try {
+                        val hotstarRes = repository.fetchIndianCatalog("Disney Plus Hotstar", skip = 0, limit = 20)
+                        indianHotstarZee5 = hotstarRes.metas
+                    } catch (e: Exception) {
+                        android.util.Log.e("HomeScreen", "Error loading Indian Hotstar", e)
+                    }
+                }
+
+                launch(Dispatchers.IO) {
+                    try {
                         val moviesRes = repository.fetchCatalog("movie", "top", skip = 0)
                         topMovies = moviesRes.metas
-                        if (featuredItem == null) {
+                        if (featuredItem == null && moviesRes.metas.isNotEmpty()) {
                             featuredItem = moviesRes.metas.firstOrNull()
                         }
                     } catch (e: Exception) {
@@ -282,6 +325,8 @@ fun HomeScreen(
                                         continueWatchingFirstItemFR.requestFocus()
                                     } else if (watchlist.isNotEmpty()) {
                                         watchlistFirstItemFR.requestFocus()
+                                    } else if (indianTopRated.isNotEmpty()) {
+                                        rowIndian1FirstItemFR.requestFocus()
                                     } else {
                                         row1FirstItemFR.requestFocus()
                                     }
@@ -455,6 +500,8 @@ fun HomeScreen(
                                                             try {
                                                                 if (watchlist.isNotEmpty()) {
                                                                     watchlistFirstItemFR.requestFocus()
+                                                                } else if (indianTopRated.isNotEmpty()) {
+                                                                    rowIndian1FirstItemFR.requestFocus()
                                                                 } else {
                                                                     row1FirstItemFR.requestFocus()
                                                                 }
@@ -573,7 +620,14 @@ fun HomeScreen(
                                                             } catch (_: Exception) { false }
                                                         }
                                                         Key.DirectionDown -> {
-                                                            try { row1FirstItemFR.requestFocus(); true } catch (_: Exception) { false }
+                                                            try {
+                                                                if (indianTopRated.isNotEmpty()) {
+                                                                    rowIndian1FirstItemFR.requestFocus()
+                                                                } else {
+                                                                    row1FirstItemFR.requestFocus()
+                                                                }
+                                                                true
+                                                            } catch (_: Exception) { false }
                                                         }
                                                         else -> false
                                                     }
@@ -594,6 +648,114 @@ fun HomeScreen(
                     }
                 }
 
+                // Indian Category 1: Top Rated Indian Cinema
+                if (indianTopRated.isNotEmpty()) {
+                    item {
+                        MediaCatalogRow(
+                            title = "🔥 Top Rated Indian Cinema",
+                            items = indianTopRated,
+                            firstItemFocusRequester = rowIndian1FirstItemFR,
+                            seeMoreFocusRequester = rowIndian1SeeMoreFR,
+                            onNavigateUpFromCards = {
+                                try {
+                                    if (watchlist.isNotEmpty()) {
+                                        watchlistFirstItemFR.requestFocus()
+                                    } else if (continueWatchingList.isNotEmpty()) {
+                                        continueWatchingFirstItemFR.requestFocus()
+                                    } else {
+                                        heroPlayFocusRequester.requestFocus()
+                                    }
+                                } catch (_: Exception) {}
+                            },
+                            onNavigateDownFromCards = {
+                                try {
+                                    if (indianOttHits.isNotEmpty()) {
+                                        rowIndian2FirstItemFR.requestFocus()
+                                    } else if (indianHotstarZee5.isNotEmpty()) {
+                                        rowIndian3FirstItemFR.requestFocus()
+                                    } else {
+                                        row1FirstItemFR.requestFocus()
+                                    }
+                                } catch (_: Exception) {}
+                            },
+                            onSeeMoreClick = {
+                                onNavigateToCatalog("Top Rated Indian Cinema", "movie", "imdb-indian", "Top Rated")
+                            },
+                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
+                        )
+                    }
+                }
+
+                // Indian Category 2: Trending on Netflix India
+                if (indianOttHits.isNotEmpty()) {
+                    item {
+                        MediaCatalogRow(
+                            title = "🎬 Trending on Netflix India",
+                            items = indianOttHits,
+                            firstItemFocusRequester = rowIndian2FirstItemFR,
+                            seeMoreFocusRequester = rowIndian2SeeMoreFR,
+                            onNavigateUpFromCards = {
+                                try {
+                                    if (indianTopRated.isNotEmpty()) {
+                                        rowIndian1FirstItemFR.requestFocus()
+                                    } else if (watchlist.isNotEmpty()) {
+                                        watchlistFirstItemFR.requestFocus()
+                                    } else if (continueWatchingList.isNotEmpty()) {
+                                        continueWatchingFirstItemFR.requestFocus()
+                                    } else {
+                                        heroPlayFocusRequester.requestFocus()
+                                    }
+                                } catch (_: Exception) {}
+                            },
+                            onNavigateDownFromCards = {
+                                try {
+                                    if (indianHotstarZee5.isNotEmpty()) {
+                                        rowIndian3FirstItemFR.requestFocus()
+                                    } else {
+                                        row1FirstItemFR.requestFocus()
+                                    }
+                                } catch (_: Exception) {}
+                            },
+                            onSeeMoreClick = {
+                                onNavigateToCatalog("Trending on Netflix India", "movie", "imdb-indian", "Netflix India")
+                            },
+                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
+                        )
+                    }
+                }
+
+                // Indian Category 3: Disney+ Hotstar & Jio Specials
+                if (indianHotstarZee5.isNotEmpty()) {
+                    item {
+                        MediaCatalogRow(
+                            title = "⭐ Disney+ Hotstar & Jio Specials",
+                            items = indianHotstarZee5,
+                            firstItemFocusRequester = rowIndian3FirstItemFR,
+                            seeMoreFocusRequester = rowIndian3SeeMoreFR,
+                            onNavigateUpFromCards = {
+                                try {
+                                    if (indianOttHits.isNotEmpty()) {
+                                        rowIndian2FirstItemFR.requestFocus()
+                                    } else if (indianTopRated.isNotEmpty()) {
+                                        rowIndian1FirstItemFR.requestFocus()
+                                    } else if (watchlist.isNotEmpty()) {
+                                        watchlistFirstItemFR.requestFocus()
+                                    } else {
+                                        heroPlayFocusRequester.requestFocus()
+                                    }
+                                } catch (_: Exception) {}
+                            },
+                            onNavigateDownFromCards = {
+                                try { row1FirstItemFR.requestFocus() } catch (_: Exception) {}
+                            },
+                            onSeeMoreClick = {
+                                onNavigateToCatalog("Disney+ Hotstar & Jio Specials", "movie", "imdb-indian", "Disney Plus Hotstar")
+                            },
+                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
+                        )
+                    }
+                }
+
                 // Category 1: Popular Movies
                 if (topMovies.isNotEmpty()) {
                     item {
@@ -604,7 +766,13 @@ fun HomeScreen(
                             seeMoreFocusRequester = row1SeeMoreFR,
                             onNavigateUpFromCards = {
                                 try {
-                                    if (watchlist.isNotEmpty()) {
+                                    if (indianHotstarZee5.isNotEmpty()) {
+                                        rowIndian3FirstItemFR.requestFocus()
+                                    } else if (indianOttHits.isNotEmpty()) {
+                                        rowIndian2FirstItemFR.requestFocus()
+                                    } else if (indianTopRated.isNotEmpty()) {
+                                        rowIndian1FirstItemFR.requestFocus()
+                                    } else if (watchlist.isNotEmpty()) {
                                         watchlistFirstItemFR.requestFocus()
                                     } else if (continueWatchingList.isNotEmpty()) {
                                         continueWatchingFirstItemFR.requestFocus()

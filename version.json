@@ -1,6 +1,6 @@
 {
-  "versionCode": 7,
-  "versionName": "1.0.6",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.6/app-universal-release.apk",
-  "changelog": "• Fixed D-Pad navigation on Home Screen and Media Detail Screen\n• Preserved search results and stream cache on back navigation\n• Added live byte-range pre-verification to prevent 403 Forbidden & frozen ARCHIVE links\n• Added multi-channel Dolby audio safeguards preventing unsupported codec crashes\n• Strict Hindi Audio detection and priority sorting"
+  "versionCode": 8,
+  "versionName": "1.0.7",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.7/app-universal-release.apk",
+  "changelog": "• Integrated IMDB Indian Cinema source at top of Home (Top Rated Indian, Netflix India, Disney+ Hotstar)\n• Added full D-pad remote navigation for Indian catalog rows\n• Cached Indian catalog locally for instant startup\n• Auto-updater enhancements"
 }

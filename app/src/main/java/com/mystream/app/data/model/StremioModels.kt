@@ -50,6 +50,36 @@ data class StremioMetaPreview(
     @SerialName("imdb_id") val imdbId: String? = null
 )
 
+@Serializable
+data class ImdbIndianItem(
+    val id: String = "",
+    val type: String = "movie",
+    val poster: String? = null,
+    val name: String = "",
+    val releaseInfo: String? = null,
+    val runtime: String? = null,
+    val imdbRating: String? = null,
+    val votes: String? = null,
+    val description: String? = null
+) {
+    fun toStremioMetaPreview(): StremioMetaPreview {
+        val ratingBadge = imdbRating?.takeIf { it != "0" && it.isNotBlank() }?.let { "★ $it" }
+        val genresList = listOfNotNull(ratingBadge, releaseInfo?.takeIf { it.isNotBlank() })
+        val cleanType = if (type.contains("series", ignoreCase = true)) "series" else "movie"
+        return StremioMetaPreview(
+            id = id,
+            type = cleanType,
+            name = name,
+            poster = poster ?: "https://images.metahub.space/poster/medium/$id/img",
+            background = "https://images.metahub.space/background/medium/$id/img",
+            description = description?.takeIf { it.isNotBlank() },
+            releaseInfo = releaseInfo,
+            imdbRating = imdbRating?.takeIf { it != "0" && it.isNotBlank() },
+            genres = genresList
+        )
+    }
+}
+
 // --- Meta Detail Response ---
 @Serializable
 data class StremioMetaDetailResponse(
