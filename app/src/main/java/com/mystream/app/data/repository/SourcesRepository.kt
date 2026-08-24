@@ -14,15 +14,19 @@ import com.mystream.app.data.model.StremioCatalogResponse
 import com.mystream.app.data.model.StremioMetaDetail
 import com.mystream.app.data.model.StremioStreamSource
 import com.mystream.app.data.resolver.PikPakStreamResolver
+import com.mystream.app.data.db.PostgresAccountFetcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import com.mystream.app.data.model.StremioMetaPreview
 import com.mystream.app.data.model.ImdbIndianItem
 import java.util.UUID
 
@@ -313,27 +317,33 @@ class SourcesRepository(
     }
 
     private var cachedIndianCatalog: Map<String, List<ImdbIndianItem>>? = null
-    private val indianCatalogDiskCacheFile by lazy { java.io.File(context.cacheDir, "imdb_indian_data.json") }
+    private val indianCatalogDiskCacheFile by lazy { java.io.File(context.filesDir, "imdb_indian_data.json") }
     private val INDIAN_CATALOG_URL = "https://raw.githubusercontent.com/piyushpradhan22/imdb-indian/refs/heads/master/data.json"
+    private val ONE_WEEK_MS = 7 * 24 * 3600 * 1000L
 
     suspend fun loadIndianCatalogData(forceRefresh: Boolean = false): Map<String, List<ImdbIndianItem>> = withContext(Dispatchers.IO) {
         cachedIndianCatalog?.let { if (!forceRefresh) return@withContext it }
 
-        // Try reading disk cache if recent (< 24 hours) and not forceRefresh
-        if (!forceRefresh && indianCatalogDiskCacheFile.exists() && System.currentTimeMillis() - indianCatalogDiskCacheFile.lastModified() < 24 * 3600 * 1000L) {
-            try {
-                val text = indianCatalogDiskCacheFile.readText()
-                if (text.isNotBlank()) {
-                    val parsed = json.decodeFromString<Map<String, List<ImdbIndianItem>>>(text)
-                    cachedIndianCatalog = parsed
-                    return@withContext parsed
+        // Use local data if cached and less than 1 week old
+        if (!forceRefresh && indianCatalogDiskCacheFile.exists() && indianCatalogDiskCacheFile.length() > 1000) {
+            val cacheAge = System.currentTimeMillis() - indianCatalogDiskCacheFile.lastModified()
+            if (cacheAge < ONE_WEEK_MS) {
+                try {
+                    val text = indianCatalogDiskCacheFile.readText()
+                    if (text.isNotBlank()) {
+                        val parsed = json.decodeFromString<Map<String, List<ImdbIndianItem>>>(text)
+                        if (parsed.isNotEmpty()) {
+                            cachedIndianCatalog = parsed
+                            return@withContext parsed
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("SourcesRepository", "Failed to parse local 1-week Indian catalog cache", e)
                 }
-            } catch (e: Exception) {
-                android.util.Log.w("SourcesRepository", "Failed to parse local Indian catalog cache", e)
             }
         }
 
-        // Fetch from GitHub raw
+        // Fetch from GitHub raw (only once a week or if cache is missing/expired/forced)
         try {
             val req = Request.Builder()
                 .url(INDIAN_CATALOG_URL)
@@ -371,6 +381,16 @@ class SourcesRepository(
         }
 
         emptyMap()
+    }
+
+    suspend fun getAllIndianCategories(): List<Pair<String, List<StremioMetaPreview>>> = withContext(Dispatchers.IO) {
+        val data = loadIndianCatalogData()
+        data.mapNotNull { (category, items) ->
+            if (items.isNotEmpty()) {
+                val previews = items.take(20).map { it.toStremioMetaPreview() }
+                category to previews
+            } else null
+        }
     }
 
     suspend fun fetchIndianCatalog(
@@ -516,9 +536,16 @@ class SourcesRepository(
             }
         } else {
             clearStreamsCache(type, imdbId)
+            val config = pikpakResolver.loadConfig()
+            val postgresUrl = config.postgresUrl.orEmpty()
+            if (postgresUrl.isNotBlank()) {
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    PostgresAccountFetcher.clearPikpakV2Record(postgresUrl, imdbId)
+                }
+            }
         }
 
-        pikpakResolver.streamPikPakStreams(type, imdbId).collect { list ->
+        pikpakResolver.streamPikPakStreams(type, imdbId, forceRefresh = forceRefresh).collect { list ->
             if (list.isNotEmpty()) {
                 persistStreams(cacheKey, list, configuredTtl)
                 emit(list)
@@ -541,6 +568,11 @@ class SourcesRepository(
             if (cached != null) return cached
         } else {
             clearStreamsCache(type, imdbId)
+            val config = pikpakResolver.loadConfig()
+            val postgresUrl = config.postgresUrl.orEmpty()
+            if (postgresUrl.isNotBlank()) {
+                PostgresAccountFetcher.clearPikpakV2Record(postgresUrl, imdbId)
+            }
         }
 
         val streams = pikpakResolver.resolvePikPakStreams(type, imdbId)

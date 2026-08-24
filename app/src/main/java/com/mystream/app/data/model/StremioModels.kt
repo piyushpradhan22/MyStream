@@ -146,16 +146,20 @@ data class StremioStreamSource(
     val behaviorHints: StremioStreamBehaviorHints? = null,
     val providerName: String? = null
 ) {
+    val isDownscaled: Boolean
+        get() = name?.contains("⬇") == true || name?.contains("⬇️") == true || title?.contains("⬇") == true || title?.contains("⬇️") == true
+
     val quality: String
         get() {
             val text = (name.orEmpty() + " " + title.orEmpty()).uppercase()
+            val suffix = if (isDownscaled) " ⬇" else ""
             return when {
-                text.contains("4K") || text.contains("2160P") || text.contains("UHD") -> "4K UHD"
-                text.contains("1080P") || text.contains("FHD") -> "1080p FHD"
-                text.contains("720P") || text.contains("HD") -> "720p HD"
-                text.contains("480P") || text.contains("SD") -> "480p SD"
-                text.contains("CAM") || text.contains("TS") || text.contains("TELESYNC") -> "CAM / TS"
-                else -> "HD"
+                text.contains("4K") || text.contains("2160P") || text.contains("UHD") -> "4K UHD$suffix"
+                text.contains("1080P") || text.contains("FHD") -> "1080p FHD$suffix"
+                text.contains("720P") || text.contains("HD") -> "720p HD$suffix"
+                text.contains("480P") || text.contains("SD") -> "480p SD$suffix"
+                text.contains("CAM") || text.contains("TS") || text.contains("TELESYNC") -> "CAM / TS$suffix"
+                else -> "HD$suffix"
             }
         }
 

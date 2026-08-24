@@ -137,12 +137,12 @@ fun CatalogGridScreen(
         }
     }
 
-    // Trigger loadMore ONLY when user actively scrolls near the very bottom
+    // Trigger loadMore proactively when user reaches near the end of the loaded grid
     val shouldLoadMore by remember {
         derivedStateOf {
             val total = gridState.layoutInfo.totalItemsCount
             val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            gridState.isScrollInProgress && total >= 30 && lastVisible >= total - 2
+            total > 0 && lastVisible >= total - 6
         }
     }
 
@@ -271,12 +271,34 @@ fun CatalogGridScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     itemsIndexed(items, key = { _, meta -> meta.id }) { index, meta ->
+                        if (index >= items.size - 6 && hasMore && !isLoadingMore && !isLoading) {
+                            LaunchedEffect(Unit) {
+                                loadMore()
+                            }
+                        }
                         PosterCard(
                             item = meta,
                             width = 0,
                             modifier = if (index == 0) Modifier.focusRequester(firstItemFocusRequester) else Modifier,
                             onClick = { onNavigateToDetail(meta.type, meta.id) }
                         )
+                    }
+
+                    if (isLoadingMore) {
+                        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = PrimaryNeon,
+                                    modifier = Modifier.size(28.dp),
+                                    strokeWidth = 3.dp
+                                )
+                            }
+                        }
                     }
                 }
             }

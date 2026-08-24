@@ -1,6 +1,6 @@
 {
-  "versionCode": 8,
-  "versionName": "1.0.7",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.7/app-universal-release.apk",
-  "changelog": "• Integrated IMDB Indian Cinema source at top of Home (Top Rated Indian, Netflix India, Disney+ Hotstar)\n• Added full D-pad remote navigation for Indian catalog rows\n• Cached Indian catalog locally for instant startup\n• Auto-updater enhancements"
+  "versionCode": 9,
+  "versionName": "1.0.8",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.8/app-universal-release.apk",
+  "changelog": "• Dynamic Cloud Quality Transcoding Fallback (720p/480p high-speed streams)\n• Downscaled stream indicator (⬇) on 1080p/4K cards resolving at 720p\n• Fixed TV Carousel horizontal scroll memory across rows\n• Redesigned StreamCard with clean sibling layout for Direct/Restart buttons\n• Unified Tab Row Refresh action and seamless D-pad Down navigation\n• Pure player D-pad seeking without interrupting overlays"
 }

@@ -258,6 +258,13 @@ class PikPakApiClient(
                 Log.w(TAG, "PikPak Add File HTTP ${response.code}: $body")
                 val rootJson = json.parseToJsonElement(body).jsonObject
 
+                if (!response.isSuccessful) {
+                    val err = rootJson["error"]?.jsonPrimitive?.content ?: "HTTP ${response.code}"
+                    val desc = rootJson["error_description"]?.jsonPrimitive?.content ?: ""
+                    Log.w(TAG, "PikPak Add File failed HTTP ${response.code}: $err - $desc")
+                    return@withContext Result.failure(IOException(if (desc.isNotBlank()) "$err: $desc" else err))
+                }
+
                 val fileObj = rootJson["file"]?.jsonObject
                 val taskObj = rootJson["task"]?.jsonObject
                 var fileId = fileObj?.get("id")?.jsonPrimitive?.content
@@ -306,33 +313,6 @@ class PikPakApiClient(
                     }
                 }
 
-                if (fileId.isNullOrBlank()) {
-                    // Check file list in account as instant fallback
-                    val fileListReq = Request.Builder()
-                        .url("https://$PIKPAK_API_HOST/drive/v1/files?limit=10")
-                        .get()
-                        .header("Authorization", "Bearer $token")
-                        .build()
-                    try {
-                        client.newCall(fileListReq).execute().use { fRes ->
-                            val fBody = fRes.body?.string()
-                            if (!fBody.isNullOrBlank()) {
-                                val fRoot = json.parseToJsonElement(fBody).jsonObject
-                                val files = fRoot["files"]?.jsonArray
-                                val found = files?.mapNotNull { it.jsonObject }?.firstOrNull {
-                                    val n = it["name"]?.jsonPrimitive?.content.orEmpty()
-                                    n != "PikPak Tutorial.mkv" && n.isNotBlank()
-                                }
-                                val foundId = found?.get("id")?.jsonPrimitive?.content
-                                if (!foundId.isNullOrBlank()) {
-                                    fileId = foundId
-                                    Log.d(TAG, "Recovered file ID from file list: $fileId")
-                                }
-                            }
-                        }
-                    } catch (ignored: Exception) {}
-                }
-
                 val finalFileId = fileId
                 if (!finalFileId.isNullOrBlank()) {
                     val streamResult = getDirectStreamUrlForFile(finalFileId, token)
@@ -363,40 +343,46 @@ class PikPakApiClient(
         fileId: String,
         token: String = cachedAccessToken ?: ""
     ): Result<String> = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Fetching direct streaming URL for file: $fileId")
-        val captchaToken = captchaInit("GET:/drive/v1/files/$fileId")
-
-        val url = "https://$PIKPAK_API_HOST/drive/v1/files/$fileId"
-        val reqBuilder = Request.Builder()
-            .url(url)
-            .get()
-            .header("Authorization", "Bearer $token")
-
-        if (!captchaToken.isNullOrBlank()) {
-            reqBuilder.header("X-Captcha-Token", captchaToken)
-        }
+        if (fileId.isBlank()) return@withContext Result.failure(IllegalArgumentException("File ID is blank"))
 
         try {
-            client.newCall(reqBuilder.build()).execute().use { response ->
-                val body = response.body?.string() ?: throw IOException("Empty response from PikPak file detail")
-                val rootJson = json.parseToJsonElement(body).jsonObject
+            val req = Request.Builder()
+                .url("https://$PIKPAK_API_HOST/drive/v1/files/$fileId")
+                .get()
+                .header("Authorization", "Bearer $token")
+                .header("User-Agent", "ANDROID-$PACKAGE_NAME/$CLIENT_VERSION")
+                .header("X-Device-Id", deviceId)
+                .build()
 
+            client.newCall(req).execute().use { response ->
+                val body = response.body?.string()
+                if (!response.isSuccessful || body.isNullOrBlank()) {
+                    return@withContext Result.failure(IOException("PikPak getDirectStreamUrl HTTP ${response.code}"))
+                }
+
+                val rootJson = json.parseToJsonElement(body).jsonObject
                 val kind = rootJson["kind"]?.jsonPrimitive?.content
+
+                // If this is a folder (multi-file torrent), list children and find the primary video file
                 if (kind == "drive#folder") {
-                    val folderListReq = Request.Builder()
-                        .url("https://$PIKPAK_API_HOST/drive/v1/files?parent_id=$fileId&limit=50")
-                        .get()
-                        .header("Authorization", "Bearer $token")
-                        .build()
                     try {
-                        client.newCall(folderListReq).execute().use { fRes ->
-                            val fBody = fRes.body?.string()
-                            if (!fBody.isNullOrBlank()) {
-                                val fRoot = json.parseToJsonElement(fBody).jsonObject
-                                val files = fRoot["files"]?.jsonArray
-                                val videoFiles = files?.mapNotNull { it.jsonObject }?.filter {
-                                    val name = it["name"]?.jsonPrimitive?.content?.lowercase().orEmpty()
-                                    name.endsWith(".mp4") || name.endsWith(".mkv") || name.endsWith(".avi") || name.endsWith(".mov")
+                        val listReq = Request.Builder()
+                            .url("https://$PIKPAK_API_HOST/drive/v1/files?parent_id=$fileId&limit=50")
+                            .get()
+                            .header("Authorization", "Bearer $token")
+                            .header("User-Agent", "ANDROID-$PACKAGE_NAME/$CLIENT_VERSION")
+                            .header("X-Device-Id", deviceId)
+                            .build()
+
+                        client.newCall(listReq).execute().use { listResp ->
+                            val listBody = listResp.body?.string()
+                            if (!listBody.isNullOrBlank()) {
+                                val listJson = json.parseToJsonElement(listBody).jsonObject
+                                val files = listJson["files"]?.jsonArray
+                                val videoFiles = files?.mapNotNull { it.jsonObject }?.filter { f ->
+                                    val name = f["name"]?.jsonPrimitive?.content.orEmpty().lowercase()
+                                    val fKind = f["kind"]?.jsonPrimitive?.content.orEmpty()
+                                    fKind == "drive#file" && (name.endsWith(".mkv") || name.endsWith(".mp4") || name.endsWith(".avi") || name.endsWith(".mov"))
                                 } ?: emptyList()
                                 val target = videoFiles.maxByOrNull {
                                     it["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
@@ -413,67 +399,73 @@ class PikPakApiClient(
                     } catch (ignored: Exception) {}
                 }
 
-                // 1. High Speed Media Streaming URL (medias[0].link.url)
-                val medias = rootJson["medias"]?.jsonArray
-                val mediaUrl = medias?.firstOrNull()?.jsonObject?.get("link")?.jsonObject?.get("url")?.jsonPrimitive?.content
-                if (!mediaUrl.isNullOrBlank()) {
-                    if (isStreamUrlLiveAndPlayable(mediaUrl)) {
-                        Log.i(TAG, "🎉 EXTRACTED HIGH-SPEED DIRECT STREAM URL: ${mediaUrl.take(70)}...")
-                        return@withContext Result.success(mediaUrl)
-                    } else {
-                        Log.w(TAG, "⚠️ Media URL failed live probe (403/ARCHIVE/0-byte), trying alternate link...")
+                fun extractMediaUrl(obj: kotlinx.serialization.json.JsonObject): String? {
+                    val medias = obj["medias"]?.jsonArray?.mapNotNull { it.jsonObject } ?: return null
+                    // Find the best quality stream that has a non-empty, valid URL
+                    // Prioritize 1080P/Original if present with URL, then 720P, then 480P
+                    val priorityCategories = listOf("category_origin", "original", "1080p", "1080", "720p", "720", "480p", "480")
+                    for (catKey in priorityCategories) {
+                        val match = medias.firstOrNull { m ->
+                            val cat = m["category"]?.jsonPrimitive?.content.orEmpty().lowercase()
+                            val name = m["media_name"]?.jsonPrimitive?.content.orEmpty().lowercase()
+                            (cat.contains(catKey) || name.contains(catKey)) && !m["link"]?.jsonObject?.get("url")?.jsonPrimitive?.content.isNullOrBlank()
+                        }
+                        val u = match?.get("link")?.jsonObject?.get("url")?.jsonPrimitive?.content
+                        if (!u.isNullOrBlank() && !u.contains("x_limited=1") && !u.contains("ms=102400")) {
+                            Log.i(TAG, "Selected streaming media: ${match["media_name"]?.jsonPrimitive?.content ?: match["category"]?.jsonPrimitive?.content}")
+                            return u
+                        }
                     }
+
+                    // Fallback to any media object with a non-empty valid URL
+                    for (m in medias) {
+                        val u = m["link"]?.jsonObject?.get("url")?.jsonPrimitive?.content
+                        if (!u.isNullOrBlank() && !u.contains("x_limited=1") && !u.contains("ms=102400")) {
+                            return u
+                        }
+                    }
+                    return null
                 }
 
-                // 2. Web Content Direct Link
-                val directLink = rootJson["web_content_link"]?.jsonPrimitive?.content
-                if (!directLink.isNullOrBlank()) {
-                    if (isStreamUrlLiveAndPlayable(directLink)) {
-                        Log.i(TAG, "🎉 EXTRACTED WEB_CONTENT_LINK: ${directLink.take(70)}...")
-                        return@withContext Result.success(directLink)
-                    } else {
-                        Log.w(TAG, "⚠️ Web content link failed live probe, rejecting stale cache...")
-                    }
+                val initialMediaUrl = extractMediaUrl(rootJson)
+                if (!initialMediaUrl.isNullOrBlank()) {
+                    Log.i(TAG, "🎉 EXTRACTED HIGH-SPEED DIRECT STREAM URL: ${initialMediaUrl.take(70)}...")
+                    return@withContext Result.success(initialMediaUrl)
                 }
 
-                Result.failure(IOException("No playable stream URL in file details"))
+                // If high-speed media stream is still generating in cloud storage, poll file details
+                var attempts = 0
+                while (attempts < 8) {
+                    kotlinx.coroutines.delay(1500)
+                    val refetchReq = Request.Builder()
+                        .url("https://$PIKPAK_API_HOST/drive/v1/files/$fileId")
+                        .get()
+                        .header("Authorization", "Bearer $token")
+                        .header("User-Agent", "ANDROID-$PACKAGE_NAME/$CLIENT_VERSION")
+                        .header("X-Device-Id", deviceId)
+                        .build()
+                    try {
+                        client.newCall(refetchReq).execute().use { r ->
+                            val b = r.body?.string()
+                            if (!b.isNullOrBlank()) {
+                                val pollRoot = json.parseToJsonElement(b).jsonObject
+                                val m = extractMediaUrl(pollRoot)
+                                if (!m.isNullOrBlank()) {
+                                    Log.i(TAG, "🎉 Recovered High-Speed URL on poll [$attempts]: ${m.take(70)}...")
+                                    return@withContext Result.success(m)
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                    attempts++
+                }
+
+                // Do NOT fallback to web_content_link as it is a throttled zip/browser download link
+                Result.failure(IOException("No unthrottled medias stream available for file $fileId"))
             }
         } catch (e: Exception) {
             Log.e(TAG, "getDirectStreamUrlForFile error", e)
             Result.failure(e)
-        }
-    }
-
-    private fun isStreamUrlLiveAndPlayable(url: String): Boolean {
-        return try {
-            val req = Request.Builder()
-                .url(url)
-                .header("User-Agent", "ANDROID-$PACKAGE_NAME/$CLIENT_VERSION")
-                .header("Range", "bytes=0-2048")
-                .get()
-                .build()
-            client.newCall(req).execute().use { res ->
-                val storageClass = res.header("X-Tos-Storage-Class") ?: res.header("x-xos-storage-class")
-                if (storageClass.equals("ARCHIVE", ignoreCase = true) || storageClass.equals("COLD", ignoreCase = true)) {
-                    Log.w(TAG, "Stream probe: storage class is $storageClass")
-                    return false
-                }
-                if (res.code !in 200..206) {
-                    Log.w(TAG, "Stream probe: HTTP error ${res.code}")
-                    return false
-                }
-                val bodyStream = res.body?.byteStream() ?: return false
-                val buf = ByteArray(64)
-                val readBytes = bodyStream.read(buf)
-                if (readBytes <= 0) {
-                    Log.w(TAG, "Stream probe: 0 bytes delivered from CDN")
-                    return false
-                }
-                true
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Stream probe exception: ${e.message}")
-            false
         }
     }
 }

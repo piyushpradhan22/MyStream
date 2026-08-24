@@ -113,14 +113,11 @@ fun HomeScreen(
     val continueWatchingFirstItemFR = remember { FocusRequester() }
     val watchlistFirstItemFR = remember { FocusRequester() }
 
-    val rowIndian1FirstItemFR = remember { FocusRequester() }
-    val rowIndian1SeeMoreFR = remember { FocusRequester() }
+    val dynamicRowFirstItemFRs = remember { mutableMapOf<Int, FocusRequester>() }
+    fun getDynamicRowFirstItemFR(index: Int): FocusRequester = dynamicRowFirstItemFRs.getOrPut(index) { FocusRequester() }
 
-    val rowIndian2FirstItemFR = remember { FocusRequester() }
-    val rowIndian2SeeMoreFR = remember { FocusRequester() }
-
-    val rowIndian3FirstItemFR = remember { FocusRequester() }
-    val rowIndian3SeeMoreFR = remember { FocusRequester() }
+    val dynamicRowSeeMoreFRs = remember { mutableMapOf<Int, FocusRequester>() }
+    fun getDynamicRowSeeMoreFR(index: Int): FocusRequester = dynamicRowSeeMoreFRs.getOrPut(index) { FocusRequester() }
 
     val row1FirstItemFR = remember { FocusRequester() }
     val row1SeeMoreFR = remember { FocusRequester() }
@@ -137,9 +134,7 @@ fun HomeScreen(
     val row5FirstItemFR = remember { FocusRequester() }
     val row5SeeMoreFR = remember { FocusRequester() }
 
-    var indianTopRated by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var indianOttHits by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var indianHotstarZee5 by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
+    var indianCategories by remember { mutableStateOf<List<Pair<String, List<StremioMetaPreview>>>>(emptyList()) }
 
     var topMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
     var topSeries by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
@@ -207,31 +202,14 @@ fun HomeScreen(
             coroutineScope {
                 launch(Dispatchers.IO) {
                     try {
-                        val indianRes = repository.fetchIndianCatalog("Top Rated", skip = 0, limit = 20)
-                        indianTopRated = indianRes.metas
-                        if (featuredItem == null && indianRes.metas.isNotEmpty()) {
-                            featuredItem = indianRes.metas.firstOrNull()
+                        val allIndian = repository.getAllIndianCategories()
+                        indianCategories = allIndian
+                        val firstCatItems = allIndian.firstOrNull()?.second
+                        if (featuredItem == null && !firstCatItems.isNullOrEmpty()) {
+                            featuredItem = firstCatItems.first()
                         }
                     } catch (e: Exception) {
-                        android.util.Log.e("HomeScreen", "Error loading Indian top rated", e)
-                    }
-                }
-
-                launch(Dispatchers.IO) {
-                    try {
-                        val netflixRes = repository.fetchIndianCatalog("Netflix India", skip = 0, limit = 20)
-                        indianOttHits = netflixRes.metas
-                    } catch (e: Exception) {
-                        android.util.Log.e("HomeScreen", "Error loading Indian Netflix", e)
-                    }
-                }
-
-                launch(Dispatchers.IO) {
-                    try {
-                        val hotstarRes = repository.fetchIndianCatalog("Disney Plus Hotstar", skip = 0, limit = 20)
-                        indianHotstarZee5 = hotstarRes.metas
-                    } catch (e: Exception) {
-                        android.util.Log.e("HomeScreen", "Error loading Indian Hotstar", e)
+                        android.util.Log.e("HomeScreen", "Error loading all Indian categories", e)
                     }
                 }
 
@@ -325,8 +303,8 @@ fun HomeScreen(
                                         continueWatchingFirstItemFR.requestFocus()
                                     } else if (watchlist.isNotEmpty()) {
                                         watchlistFirstItemFR.requestFocus()
-                                    } else if (indianTopRated.isNotEmpty()) {
-                                        rowIndian1FirstItemFR.requestFocus()
+                                    } else if (indianCategories.isNotEmpty()) {
+                                        getDynamicRowFirstItemFR(0).requestFocus()
                                     } else {
                                         row1FirstItemFR.requestFocus()
                                     }
@@ -488,30 +466,7 @@ fun HomeScreen(
                                     PosterCard(
                                         item = preview,
                                         progressFraction = record.progressFraction,
-                                        modifier = Modifier
-                                            .then(if (index == 0) Modifier.focusRequester(continueWatchingFirstItemFR) else Modifier)
-                                            .onPreviewKeyEvent { keyEvent ->
-                                                if (keyEvent.type == KeyEventType.KeyDown) {
-                                                    when (keyEvent.key) {
-                                                        Key.DirectionUp -> {
-                                                            try { heroPlayFocusRequester.requestFocus(); true } catch (_: Exception) { false }
-                                                        }
-                                                        Key.DirectionDown -> {
-                                                            try {
-                                                                if (watchlist.isNotEmpty()) {
-                                                                    watchlistFirstItemFR.requestFocus()
-                                                                } else if (indianTopRated.isNotEmpty()) {
-                                                                    rowIndian1FirstItemFR.requestFocus()
-                                                                } else {
-                                                                    row1FirstItemFR.requestFocus()
-                                                                }
-                                                                true
-                                                            } catch (_: Exception) { false }
-                                                        }
-                                                        else -> false
-                                                    }
-                                                } else false
-                                            },
+                                        modifier = if (index == 0) Modifier.focusRequester(continueWatchingFirstItemFR) else Modifier,
                                         onClearClick = {
                                             scope.launch {
                                                 repository.removePlaybackProgress(record.mediaId)
@@ -604,35 +559,7 @@ fun HomeScreen(
                                     PosterCard(
                                         item = preview,
                                         progressFraction = null,
-                                        modifier = Modifier
-                                            .then(if (index == 0) Modifier.focusRequester(watchlistFirstItemFR) else Modifier)
-                                            .onPreviewKeyEvent { keyEvent ->
-                                                if (keyEvent.type == KeyEventType.KeyDown) {
-                                                    when (keyEvent.key) {
-                                                        Key.DirectionUp -> {
-                                                            try {
-                                                                if (continueWatchingList.isNotEmpty()) {
-                                                                    continueWatchingFirstItemFR.requestFocus()
-                                                                } else {
-                                                                    heroPlayFocusRequester.requestFocus()
-                                                                }
-                                                                true
-                                                            } catch (_: Exception) { false }
-                                                        }
-                                                        Key.DirectionDown -> {
-                                                            try {
-                                                                if (indianTopRated.isNotEmpty()) {
-                                                                    rowIndian1FirstItemFR.requestFocus()
-                                                                } else {
-                                                                    row1FirstItemFR.requestFocus()
-                                                                }
-                                                                true
-                                                            } catch (_: Exception) { false }
-                                                        }
-                                                        else -> false
-                                                    }
-                                                } else false
-                                            },
+                                        modifier = if (index == 0) Modifier.focusRequester(watchlistFirstItemFR) else Modifier,
                                         onClearClick = {
                                             scope.launch {
                                                 repository.removeFromWatchlist(item.id)
@@ -648,112 +575,19 @@ fun HomeScreen(
                     }
                 }
 
-                // Indian Category 1: Top Rated Indian Cinema
-                if (indianTopRated.isNotEmpty()) {
-                    item {
-                        MediaCatalogRow(
-                            title = "🔥 Top Rated Indian Cinema",
-                            items = indianTopRated,
-                            firstItemFocusRequester = rowIndian1FirstItemFR,
-                            seeMoreFocusRequester = rowIndian1SeeMoreFR,
-                            onNavigateUpFromCards = {
-                                try {
-                                    if (watchlist.isNotEmpty()) {
-                                        watchlistFirstItemFR.requestFocus()
-                                    } else if (continueWatchingList.isNotEmpty()) {
-                                        continueWatchingFirstItemFR.requestFocus()
-                                    } else {
-                                        heroPlayFocusRequester.requestFocus()
-                                    }
-                                } catch (_: Exception) {}
-                            },
-                            onNavigateDownFromCards = {
-                                try {
-                                    if (indianOttHits.isNotEmpty()) {
-                                        rowIndian2FirstItemFR.requestFocus()
-                                    } else if (indianHotstarZee5.isNotEmpty()) {
-                                        rowIndian3FirstItemFR.requestFocus()
-                                    } else {
-                                        row1FirstItemFR.requestFocus()
-                                    }
-                                } catch (_: Exception) {}
-                            },
-                            onSeeMoreClick = {
-                                onNavigateToCatalog("Top Rated Indian Cinema", "movie", "imdb-indian", "Top Rated")
-                            },
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
-                        )
-                    }
-                }
-
-                // Indian Category 2: Trending on Netflix India
-                if (indianOttHits.isNotEmpty()) {
-                    item {
-                        MediaCatalogRow(
-                            title = "🎬 Trending on Netflix India",
-                            items = indianOttHits,
-                            firstItemFocusRequester = rowIndian2FirstItemFR,
-                            seeMoreFocusRequester = rowIndian2SeeMoreFR,
-                            onNavigateUpFromCards = {
-                                try {
-                                    if (indianTopRated.isNotEmpty()) {
-                                        rowIndian1FirstItemFR.requestFocus()
-                                    } else if (watchlist.isNotEmpty()) {
-                                        watchlistFirstItemFR.requestFocus()
-                                    } else if (continueWatchingList.isNotEmpty()) {
-                                        continueWatchingFirstItemFR.requestFocus()
-                                    } else {
-                                        heroPlayFocusRequester.requestFocus()
-                                    }
-                                } catch (_: Exception) {}
-                            },
-                            onNavigateDownFromCards = {
-                                try {
-                                    if (indianHotstarZee5.isNotEmpty()) {
-                                        rowIndian3FirstItemFR.requestFocus()
-                                    } else {
-                                        row1FirstItemFR.requestFocus()
-                                    }
-                                } catch (_: Exception) {}
-                            },
-                            onSeeMoreClick = {
-                                onNavigateToCatalog("Trending on Netflix India", "movie", "imdb-indian", "Netflix India")
-                            },
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
-                        )
-                    }
-                }
-
-                // Indian Category 3: Disney+ Hotstar & Jio Specials
-                if (indianHotstarZee5.isNotEmpty()) {
-                    item {
-                        MediaCatalogRow(
-                            title = "⭐ Disney+ Hotstar & Jio Specials",
-                            items = indianHotstarZee5,
-                            firstItemFocusRequester = rowIndian3FirstItemFR,
-                            seeMoreFocusRequester = rowIndian3SeeMoreFR,
-                            onNavigateUpFromCards = {
-                                try {
-                                    if (indianOttHits.isNotEmpty()) {
-                                        rowIndian2FirstItemFR.requestFocus()
-                                    } else if (indianTopRated.isNotEmpty()) {
-                                        rowIndian1FirstItemFR.requestFocus()
-                                    } else if (watchlist.isNotEmpty()) {
-                                        watchlistFirstItemFR.requestFocus()
-                                    } else {
-                                        heroPlayFocusRequester.requestFocus()
-                                    }
-                                } catch (_: Exception) {}
-                            },
-                            onNavigateDownFromCards = {
-                                try { row1FirstItemFR.requestFocus() } catch (_: Exception) {}
-                            },
-                            onSeeMoreClick = {
-                                onNavigateToCatalog("Disney+ Hotstar & Jio Specials", "movie", "imdb-indian", "Disney Plus Hotstar")
-                            },
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
-                        )
-                    }
+                // All Indian Categories from data.json (preserving exact original names)
+                itemsIndexed(indianCategories, key = { _, pair -> "indian_${pair.first}" }) { idx, pair ->
+                    val (catKey, catItems) = pair
+                    MediaCatalogRow(
+                        title = catKey,
+                        items = catItems,
+                        firstItemFocusRequester = getDynamicRowFirstItemFR(idx),
+                        seeMoreFocusRequester = getDynamicRowSeeMoreFR(idx),
+                        onSeeMoreClick = {
+                            onNavigateToCatalog(catKey, "movie", "imdb-indian", catKey)
+                        },
+                        onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
+                    )
                 }
 
                 // Category 1: Popular Movies
@@ -764,26 +598,6 @@ fun HomeScreen(
                             items = topMovies,
                             firstItemFocusRequester = row1FirstItemFR,
                             seeMoreFocusRequester = row1SeeMoreFR,
-                            onNavigateUpFromCards = {
-                                try {
-                                    if (indianHotstarZee5.isNotEmpty()) {
-                                        rowIndian3FirstItemFR.requestFocus()
-                                    } else if (indianOttHits.isNotEmpty()) {
-                                        rowIndian2FirstItemFR.requestFocus()
-                                    } else if (indianTopRated.isNotEmpty()) {
-                                        rowIndian1FirstItemFR.requestFocus()
-                                    } else if (watchlist.isNotEmpty()) {
-                                        watchlistFirstItemFR.requestFocus()
-                                    } else if (continueWatchingList.isNotEmpty()) {
-                                        continueWatchingFirstItemFR.requestFocus()
-                                    } else {
-                                        heroPlayFocusRequester.requestFocus()
-                                    }
-                                } catch (_: Exception) {}
-                            },
-                            onNavigateDownFromCards = {
-                                try { row2FirstItemFR.requestFocus() } catch (_: Exception) {}
-                            },
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Popular Movies", "movie", "top", null)
                             },
@@ -800,12 +614,6 @@ fun HomeScreen(
                             items = topSeries,
                             firstItemFocusRequester = row2FirstItemFR,
                             seeMoreFocusRequester = row2SeeMoreFR,
-                            onNavigateUpFromCards = {
-                                try { row1FirstItemFR.requestFocus() } catch (_: Exception) {}
-                            },
-                            onNavigateDownFromCards = {
-                                try { row3FirstItemFR.requestFocus() } catch (_: Exception) {}
-                            },
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Popular Series", "series", "top", null)
                             },
@@ -822,12 +630,6 @@ fun HomeScreen(
                             items = actionMovies,
                             firstItemFocusRequester = row3FirstItemFR,
                             seeMoreFocusRequester = row3SeeMoreFR,
-                            onNavigateUpFromCards = {
-                                try { row2FirstItemFR.requestFocus() } catch (_: Exception) {}
-                            },
-                            onNavigateDownFromCards = {
-                                try { row4FirstItemFR.requestFocus() } catch (_: Exception) {}
-                            },
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Action & Adventure", "movie", "top", "Action")
                             },
@@ -844,12 +646,6 @@ fun HomeScreen(
                             items = scifiMovies,
                             firstItemFocusRequester = row4FirstItemFR,
                             seeMoreFocusRequester = row4SeeMoreFR,
-                            onNavigateUpFromCards = {
-                                try { row3FirstItemFR.requestFocus() } catch (_: Exception) {}
-                            },
-                            onNavigateDownFromCards = {
-                                try { row5FirstItemFR.requestFocus() } catch (_: Exception) {}
-                            },
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Sci-Fi & Thriller", "movie", "top", "Sci-Fi")
                             },
@@ -866,10 +662,6 @@ fun HomeScreen(
                             items = comedySeries,
                             firstItemFocusRequester = row5FirstItemFR,
                             seeMoreFocusRequester = row5SeeMoreFR,
-                            onNavigateUpFromCards = {
-                                try { row4FirstItemFR.requestFocus() } catch (_: Exception) {}
-                            },
-                            onNavigateDownFromCards = null,
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Binge-Worthy Comedies", "series", "top", "Comedy")
                             },
@@ -947,8 +739,6 @@ private fun MediaCatalogRow(
     items: List<StremioMetaPreview>,
     firstItemFocusRequester: FocusRequester,
     seeMoreFocusRequester: FocusRequester,
-    onNavigateUpFromCards: (() -> Unit)? = null,
-    onNavigateDownFromCards: (() -> Unit)? = null,
     onSeeMoreClick: () -> Unit,
     onItemClick: (StremioMetaPreview) -> Unit
 ) {
@@ -962,8 +752,10 @@ private fun MediaCatalogRow(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            CategoryBadgeIcon(categoryName = title)
+
             Text(
                 text = title,
                 color = TextPrimary,
@@ -994,24 +786,6 @@ private fun MediaCatalogRow(
                                     onSeeMoreClick()
                                     true
                                 }
-                                Key.DirectionDown -> {
-                                    try {
-                                        firstItemFocusRequester.requestFocus()
-                                        true
-                                    } catch (_: Exception) {
-                                        false
-                                    }
-                                }
-                                Key.DirectionUp -> {
-                                    if (onNavigateUpFromCards != null) {
-                                        try {
-                                            onNavigateUpFromCards()
-                                            true
-                                        } catch (_: Exception) {
-                                            false
-                                        }
-                                    } else false
-                                }
                                 else -> false
                             }
                         } else false
@@ -1041,35 +815,7 @@ private fun MediaCatalogRow(
             itemsIndexed(items, key = { _, meta -> meta.id }) { index, meta ->
                 PosterCard(
                     item = meta,
-                    modifier = Modifier
-                        .then(if (index == 0) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
-                        .onPreviewKeyEvent { keyEvent ->
-                            if (keyEvent.type == KeyEventType.KeyDown) {
-                                when (keyEvent.key) {
-                                    Key.DirectionUp -> {
-                                        if (onNavigateUpFromCards != null) {
-                                            try {
-                                                onNavigateUpFromCards()
-                                                true
-                                            } catch (_: Exception) {
-                                                false
-                                            }
-                                        } else false
-                                    }
-                                    Key.DirectionDown -> {
-                                        if (onNavigateDownFromCards != null) {
-                                            try {
-                                                onNavigateDownFromCards()
-                                                true
-                                            } catch (_: Exception) {
-                                                false
-                                            }
-                                        } else false
-                                    }
-                                    else -> false
-                                }
-                            } else false
-                        },
+                    modifier = if (index == 0) Modifier.focusRequester(firstItemFocusRequester) else Modifier,
                     onClick = { onItemClick(meta) }
                 )
             }
@@ -1260,6 +1006,167 @@ private fun FirstStartupSetupDialog(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryBadgeIcon(categoryName: String) {
+    val clean = categoryName.trim()
+    when {
+        clean.contains("Netflix", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFFE50914))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "N",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 13.sp,
+                    letterSpacing = 1.sp
+                )
+            }
+        }
+        clean.contains("Prime", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF00A8E1))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "prime",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                )
+            }
+        }
+        clean.contains("Disney", ignoreCase = true) || clean.contains("Hotstar", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF0F1035))
+                    .border(1.dp, Color(0xFF1E88E5), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Disney+",
+                    color = Color(0xFF90CAF9),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                )
+            }
+        }
+        clean.contains("Jio", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFFE50055))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Jio",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                )
+            }
+        }
+        clean.contains("Zee5", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF8224E3))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "ZEE5",
+                    color = Color.White,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 10.sp
+                )
+            }
+        }
+        clean.contains("Sony", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFFFF6900))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "LIV",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 11.sp
+                )
+            }
+        }
+        clean.equals("Top Rated", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFFF5C518))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "★ TOP",
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp
+                )
+            }
+        }
+        clean.contains("Hindi", ignoreCase = true) -> {
+            Text(
+                text = "🇮🇳",
+                fontSize = 16.sp
+            )
+        }
+        clean.contains("Series", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0x3300E5FF))
+                    .border(1.dp, Color(0xFF00E5FF), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "SERIES",
+                    color = Color(0xFF00E5FF),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp
+                )
+            }
+        }
+        clean.contains("Movie", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0x336C5CE7))
+                    .border(1.dp, Color(0xFF6C5CE7), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "MOVIE",
+                    color = Color(0xFFA29BFE),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp
+                )
             }
         }
     }

@@ -119,6 +119,7 @@ fun DetailScreen(
 
     val availableTabFocusRequester = remember { FocusRequester() }
     val allTorrentsTabFocusRequester = remember { FocusRequester() }
+    val streamRefreshButtonFocusRequester = remember { FocusRequester() }
     val firstStreamFocusRequester = remember { FocusRequester() }
     val firstTorrentFocusRequester = remember { FocusRequester() }
 
@@ -127,6 +128,9 @@ fun DetailScreen(
 
     val tab1InteractionSource = remember { MutableInteractionSource() }
     val isTab1Focused by tab1InteractionSource.collectIsFocusedAsState()
+
+    val streamRefreshInteractionSource = remember { MutableInteractionSource() }
+    val isStreamRefreshFocused by streamRefreshInteractionSource.collectIsFocusedAsState()
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val torrentEngine = remember { com.mystream.app.torrent.TorrentStreamEngine.getInstance(context) }
@@ -158,8 +162,12 @@ fun DetailScreen(
         }
     }
 
+    var streamLoadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var torrentsLoadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
     fun loadStreams(queryId: String, forceRefresh: Boolean = false) {
-        scope.launch {
+        streamLoadJob?.cancel()
+        streamLoadJob = scope.launch {
             if (forceRefresh || streams.isEmpty()) {
                 isStreamsLoading = true
                 isResolvingMoreStreams = true
@@ -171,7 +179,7 @@ fun DetailScreen(
                     isStreamsLoading = false
                 }
             } catch (e: Exception) {
-                // keep current
+                if (e is kotlinx.coroutines.CancellationException) throw e
             } finally {
                 isStreamsLoading = false
                 isResolvingMoreStreams = false
@@ -180,13 +188,14 @@ fun DetailScreen(
     }
 
     fun loadAllTorrents(queryId: String) {
-        scope.launch {
+        torrentsLoadJob?.cancel()
+        torrentsLoadJob = scope.launch {
             isTorrentsLoading = true
             allTorrents = emptyList()
             try {
                 allTorrents = repository.fetchAllTorrentsForMedia(type, queryId)
             } catch (e: Exception) {
-                // ignore
+                if (e is kotlinx.coroutines.CancellationException) throw e
             } finally {
                 isTorrentsLoading = false
             }
@@ -319,7 +328,11 @@ fun DetailScreen(
                                             true
                                         }
                                         Key.DirectionDown -> {
-                                            availableTabFocusRequester.safeRequestFocus()
+                                            if (selectedStreamTab == 1) {
+                                                allTorrentsTabFocusRequester.safeRequestFocus()
+                                            } else {
+                                                availableTabFocusRequester.safeRequestFocus()
+                                            }
                                             true
                                         }
                                         else -> false
@@ -363,7 +376,11 @@ fun DetailScreen(
                                             true
                                         }
                                         Key.DirectionDown -> {
-                                            availableTabFocusRequester.safeRequestFocus()
+                                            if (selectedStreamTab == 1) {
+                                                allTorrentsTabFocusRequester.safeRequestFocus()
+                                            } else {
+                                                availableTabFocusRequester.safeRequestFocus()
+                                            }
                                             true
                                         }
                                         Key.DirectionCenter,
@@ -685,7 +702,7 @@ fun DetailScreen(
                                         .background(PrimaryNeon.copy(alpha = 0.15f))
                                         .border(1.dp, PrimaryNeon.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
                                         .padding(horizontal = 8.dp, vertical = 3.dp)
-                                ) {
+                                    ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(5.dp)
@@ -705,31 +722,15 @@ fun DetailScreen(
                                 }
                             }
                         }
-
-                        IconButton(
-                            onClick = {
-                                val queryId = if (isSeries) selectedEpisode?.id ?: id else id
-                                if (selectedStreamTab == 0) {
-                                    loadStreams(queryId, forceRefresh = true)
-                                } else {
-                                    loadAllTorrents(queryId)
-                                }
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Refresh Streams",
-                                tint = if (isResolvingMoreStreams) PrimaryNeon else TextSecondary
-                            )
-                        }
                     }
 
-                    // Tab Selector: Available Streams vs All Torrents
+                    // Tab Selector: Available Streams vs All Torrents vs Refresh Button
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Tab 0: Available Fast Streams (Default)
                         val isTab0Selected = selectedStreamTab == 0
@@ -749,9 +750,13 @@ fun DetailScreen(
                                             true
                                         }
                                         Key.DirectionDown -> {
-                                            if (streams.isNotEmpty()) {
+                                            if (selectedStreamTab == 1 && allTorrents.isNotEmpty()) {
+                                                firstTorrentFocusRequester.safeRequestFocus()
+                                            } else if (streams.isNotEmpty()) {
+                                                selectedStreamTab = 0
                                                 firstStreamFocusRequester.safeRequestFocus()
                                             } else if (allTorrents.isNotEmpty()) {
+                                                selectedStreamTab = 1
                                                 firstTorrentFocusRequester.safeRequestFocus()
                                             }
                                             true
@@ -815,13 +820,18 @@ fun DetailScreen(
                                             true
                                         }
                                         Key.DirectionRight -> {
+                                            streamRefreshButtonFocusRequester.safeRequestFocus()
                                             true
                                         }
                                         Key.DirectionDown -> {
                                             if (selectedStreamTab == 1 && allTorrents.isNotEmpty()) {
                                                 firstTorrentFocusRequester.safeRequestFocus()
                                             } else if (streams.isNotEmpty()) {
+                                                selectedStreamTab = 0
                                                 firstStreamFocusRequester.safeRequestFocus()
+                                            } else if (allTorrents.isNotEmpty()) {
+                                                selectedStreamTab = 1
+                                                firstTorrentFocusRequester.safeRequestFocus()
                                             }
                                             true
                                         }
@@ -878,6 +888,81 @@ fun DetailScreen(
                                 )
                             }
                         }
+
+                        // Refresh / Reload Button (integrated in Tab Row with D-pad navigation)
+                        Box(
+                            modifier = Modifier
+                                .focusRequester(streamRefreshButtonFocusRequester)
+                                .focusable(interactionSource = streamRefreshInteractionSource)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    when (keyEvent.key) {
+                                        Key.DirectionLeft -> {
+                                            allTorrentsTabFocusRequester.safeRequestFocus()
+                                            true
+                                        }
+                                        Key.DirectionRight -> true
+                                        Key.DirectionDown -> {
+                                            if (selectedStreamTab == 1 && allTorrents.isNotEmpty()) {
+                                                firstTorrentFocusRequester.safeRequestFocus()
+                                            } else if (streams.isNotEmpty()) {
+                                                selectedStreamTab = 0
+                                                firstStreamFocusRequester.safeRequestFocus()
+                                            } else if (allTorrents.isNotEmpty()) {
+                                                selectedStreamTab = 1
+                                                firstTorrentFocusRequester.safeRequestFocus()
+                                            }
+                                            true
+                                        }
+                                        Key.DirectionUp -> {
+                                            watchlistButtonFocusRequester.safeRequestFocus()
+                                            true
+                                        }
+                                        Key.DirectionCenter,
+                                        Key.Enter,
+                                        Key.NumPadEnter,
+                                        Key.Spacebar -> {
+                                            val queryId = if (isSeries) selectedEpisode?.id ?: id else id
+                                            loadStreams(queryId, forceRefresh = true)
+                                            loadAllTorrents(queryId)
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                }
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isStreamRefreshFocused) FocusRingOrange.copy(alpha = 0.35f) else SurfaceCard)
+                                .border(
+                                    if (isStreamRefreshFocused) 2.5.dp else 1.dp,
+                                    if (isStreamRefreshFocused) FocusRingOrange else Color(0x22FFFFFF),
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .clickable(interactionSource = streamRefreshInteractionSource, indication = null) {
+                                    val queryId = if (isSeries) selectedEpisode?.id ?: id else id
+                                    loadStreams(queryId, forceRefresh = true)
+                                    loadAllTorrents(queryId)
+                                }
+                                .padding(horizontal = 14.dp, vertical = 9.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh",
+                                    tint = if (isStreamRefreshFocused) FocusRingOrange else if (isResolvingMoreStreams || isStreamsLoading || isTorrentsLoading) PrimaryNeon else TextSecondary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Text(
+                                    text = "Refresh",
+                                    color = if (isStreamRefreshFocused) FocusRingOrange else TextSecondary,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isStreamRefreshFocused) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -917,7 +1002,18 @@ fun DetailScreen(
                                     .padding(30.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(color = PrimaryNeon)
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    CircularProgressIndicator(color = PrimaryNeon, modifier = Modifier.size(30.dp), strokeWidth = 3.dp)
+                                    Text(
+                                        text = "Fetching and recovering cloud streams...",
+                                        color = TextSecondary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                             }
                         }
                     } else if (streams.isEmpty()) {
@@ -1001,49 +1097,16 @@ fun DetailScreen(
                                 }
                             }
 
-                            val isSavedInWatchlist = watchlist.any { it.id == streamKey || (stream.infoHash != null && it.infoHash == stream.infoHash) }
                             Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 5.dp)) {
                                 StreamCard(
                                     stream = stream,
                                     isResolving = isResolvingThis,
                                     externalFocusRequester = if (index == 0) firstStreamFocusRequester else null,
-                                    modifier = if (index == 0) {
-                                        Modifier.onPreviewKeyEvent { keyEvent ->
-                                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionUp) {
-                                                availableTabFocusRequester.safeRequestFocus()
-                                                true
-                                            } else false
-                                        }
-                                    } else Modifier,
+                                    onUp = if (index == 0) {
+                                        { streamRefreshButtonFocusRequester.safeRequestFocus() }
+                                    } else null,
                                     onClick = { launchStream(restartFromBeginning = false) },
-                                    onRestart = { launchStream(restartFromBeginning = true) },
-                                    onWatchlistToggle = {
-                                        scope.launch {
-                                            if (isSavedInWatchlist) {
-                                                repository.removeFromWatchlist(streamKey)
-                                                stream.infoHash?.let { repository.removeFromWatchlist(it) }
-                                                android.widget.Toast.makeText(context, "Removed from Watchlist", android.widget.Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                val watchItem = com.mystream.app.data.model.WatchlistItem(
-                                                    id = streamKey,
-                                                    imdbId = detail.id,
-                                                    title = if (isSeries && selectedEpisode != null) "${detail.name} (S${selectedEpisode?.season}E${selectedEpisode?.episode})" else detail.name,
-                                                    subtitle = "${stream.quality} • ${stream.providerName ?: "Stream"}",
-                                                    posterUrl = selectedEpisode?.thumbnail ?: detail.poster,
-                                                    backdropUrl = detail.background,
-                                                    type = detail.type,
-                                                    seasonNumber = selectedEpisode?.season ?: 0,
-                                                    episodeNumber = selectedEpisode?.episode ?: 0,
-                                                    infoHash = stream.infoHash,
-                                                    torrentTitle = stream.title ?: stream.name,
-                                                    torrentQuality = stream.quality
-                                                )
-                                                repository.addToWatchlist(watchItem)
-                                                android.widget.Toast.makeText(context, "Added to Watchlist!", android.widget.Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    },
-                                    isSavedToWatchlist = isSavedInWatchlist
+                                    onRestart = { launchStream(restartFromBeginning = true) }
                                 )
                             }
                         }
@@ -1185,21 +1248,15 @@ fun DetailScreen(
                             }
 
                             val isUnder6Gb = torr.fileSizeMb <= 6000.0
-                            val isSavedInWatchlist = watchlist.any { it.id == streamKey || (torr.infoHash != null && it.infoHash == torr.infoHash) }
 
                             Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 5.dp)) {
                                 StreamCard(
                                     stream = torr,
                                     isResolving = isResolvingThis,
                                     externalFocusRequester = if (index == 0) firstTorrentFocusRequester else null,
-                                    modifier = if (index == 0) {
-                                        Modifier.onPreviewKeyEvent { keyEvent ->
-                                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionUp) {
-                                                availableTabFocusRequester.safeRequestFocus()
-                                                true
-                                            } else false
-                                        }
-                                    } else Modifier,
+                                    onUp = if (index == 0) {
+                                        { streamRefreshButtonFocusRequester.safeRequestFocus() }
+                                    } else null,
                                     onClick = {
                                         torr.infoHash?.let { hash ->
                                             p2pRestartFromBeginning = false
@@ -1219,33 +1276,6 @@ fun DetailScreen(
                                     onMagnetStream = if (isUnder6Gb) {
                                         { resolveAndPlay(restartFromBeginning = false) }
                                     } else null,
-                                    onWatchlistToggle = {
-                                        scope.launch {
-                                            if (isSavedInWatchlist) {
-                                                repository.removeFromWatchlist(streamKey)
-                                                torr.infoHash?.let { repository.removeFromWatchlist(it) }
-                                                android.widget.Toast.makeText(context, "Removed from Watchlist", android.widget.Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                val watchItem = com.mystream.app.data.model.WatchlistItem(
-                                                    id = streamKey,
-                                                    imdbId = detail.id,
-                                                    title = if (isSeries && selectedEpisode != null) "${detail.name} (S${selectedEpisode?.season}E${selectedEpisode?.episode})" else detail.name,
-                                                    subtitle = "${torr.quality} • ${torr.fileSize ?: ""}".trim().removeSuffix("•").trim(),
-                                                    posterUrl = selectedEpisode?.thumbnail ?: detail.poster,
-                                                    backdropUrl = detail.background,
-                                                    type = detail.type,
-                                                    seasonNumber = selectedEpisode?.season ?: 0,
-                                                    episodeNumber = selectedEpisode?.episode ?: 0,
-                                                    infoHash = torr.infoHash,
-                                                    torrentTitle = torr.title ?: torr.name,
-                                                    torrentQuality = torr.quality
-                                                )
-                                                repository.addToWatchlist(watchItem)
-                                                android.widget.Toast.makeText(context, "Added to Watchlist!", android.widget.Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    },
-                                    isSavedToWatchlist = isSavedInWatchlist,
                                     actionButtonText = "☁ Direct"
                                 )
                             }
@@ -1361,6 +1391,48 @@ fun DetailScreen(
                             ) {
                                 Text("Cancel")
                             }
+                        }
+                    }
+                }
+            }
+
+            // Cloud Stream Resolving / Recovering Dialog
+            if (resolvingStreamKey != null) {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = {
+                        resolvingStreamKey = null
+                    }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.85f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(SurfaceDark)
+                            .border(1.5.dp, PrimaryNeon, RoundedCornerShape(16.dp))
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                color = PrimaryNeon,
+                                modifier = Modifier.size(36.dp),
+                                strokeWidth = 3.dp
+                            )
+                            Text(
+                                text = "☁️ Recovering Stream from Cloud...",
+                                color = TextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "PikPak is preparing your high-speed playback link. Please wait a few seconds...",
+                                color = TextMuted,
+                                fontSize = 12.5.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
                         }
                     }
                 }

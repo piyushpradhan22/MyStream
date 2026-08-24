@@ -181,9 +181,13 @@ class PikPakStreamResolver(
     }
 
     suspend fun fetchAllTorrentioTorrents(type: String, id: String): List<StremioStreamSource> = withContext(Dispatchers.IO) {
-        val torrentioBase = "https://torrentio.strem.fun/language=hindi|qualityfilter=480p,other,scr,cam,unknown"
+        val torrentioHindiBase = "https://torrentio.strem.fun/language=hindi|qualityfilter=480p,other,scr,cam,unknown"
+        val torrentioGeneralBase = "https://torrentio.strem.fun/qualityfilter=480p,other,scr,cam,unknown"
         try {
-            val rawTorrents = stremioClient.getStreams(torrentioBase, type, id)
+            var rawTorrents = stremioClient.getStreams(torrentioHindiBase, type, id)
+            if (rawTorrents.isEmpty()) {
+                rawTorrents = stremioClient.getStreams(torrentioGeneralBase, type, id)
+            }
             val collectionKeywords = listOf("complete", "collection", "pack", "moviesup")
             val filteredTorrents = mutableListOf<StremioStreamSource>()
             val lowerPriorityTorrents = mutableListOf<StremioStreamSource>()
@@ -212,32 +216,49 @@ class PikPakStreamResolver(
      */
     fun streamPikPakStreams(
         type: String,
-        id: String
+        id: String,
+        forceRefresh: Boolean = false
     ): Flow<List<StremioStreamSource>> = channelFlow {
         Log.i(TAG, "==================================================")
-        Log.i(TAG, "Starting non-blocking 1-by-1 stream emission for $type -> $id")
+        Log.i(TAG, "Starting non-blocking 1-by-1 stream emission for $type -> $id (forceRefresh=$forceRefresh)")
         val config = loadConfig()
         val postgresUrl = config.postgresUrl.orEmpty()
         val sharedPass = if (config.pikpakPassword.isNotBlank()) config.pikpakPassword else config.primaryAccount?.password.orEmpty()
 
+        if (forceRefresh && postgresUrl.isNotBlank()) {
+            launch(Dispatchers.IO) {
+                PostgresAccountFetcher.clearPikpakV2Record(postgresUrl, id)
+            }
+        }
+
         // 1. Fetch Torrentio + pikpak_v2 + pikpak_torrents all concurrently in PARALLEL upfront!
-        val torrentioFilteredBase = "https://torrentio.strem.fun/language=hindi|qualityfilter=480p,other,scr,cam,unknown|sizefilter=6GB"
+        val torrentioHindiBase = "https://torrentio.strem.fun/language=hindi|qualityfilter=480p,other,scr,cam,unknown|sizefilter=6GB"
+        val torrentioGeneralBase = "https://torrentio.strem.fun/qualityfilter=480p,other,scr,cam,unknown|sizefilter=6GB"
 
         val torrentsDeferred = async(Dispatchers.IO) {
             try {
-                stremioClient.getStreams(torrentioFilteredBase, type, id)
+                val hindiTorrents = stremioClient.getStreams(torrentioHindiBase, type, id)
+                if (hindiTorrents.isNotEmpty()) {
+                    hindiTorrents
+                } else {
+                    stremioClient.getStreams(torrentioGeneralBase, type, id)
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "Error fetching from Torrentio", e)
-                emptyList()
+                try {
+                    stremioClient.getStreams(torrentioGeneralBase, type, id)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Error fetching from Torrentio", e2)
+                    emptyList()
+                }
             }
         }
 
         val dataV2Deferred = async(Dispatchers.IO) {
-            if (postgresUrl.isNotBlank()) PostgresAccountFetcher.getPikpakV2Records(postgresUrl, id) else emptyList()
+            if (!forceRefresh && postgresUrl.isNotBlank()) PostgresAccountFetcher.getPikpakV2Records(postgresUrl, id) else emptyList()
         }
 
         val dataTorrentsDeferred = async(Dispatchers.IO) {
-            if (postgresUrl.isNotBlank()) PostgresAccountFetcher.getPikpakTorrents(postgresUrl, id) else emptyList()
+            if (!forceRefresh && postgresUrl.isNotBlank()) PostgresAccountFetcher.getPikpakTorrents(postgresUrl, id) else emptyList()
         }
 
         val rawTorrents = torrentsDeferred.await()
@@ -275,7 +296,7 @@ class PikPakStreamResolver(
         val resolvedQualities = mutableSetOf<String>()
 
         // 2. Check and reuse cached records in pikpak_v2
-        if (postgresUrl.isNotBlank() && dataV2.isNotEmpty()) {
+        if (!forceRefresh && postgresUrl.isNotBlank() && dataV2.isNotEmpty()) {
             val validCachedRecords = dataV2.filter { rec ->
                 rec.infoHash.isBlank() || currentInfoHashes.contains(rec.infoHash)
             }
@@ -294,9 +315,13 @@ class PikPakStreamResolver(
                         }
                         val urlRes = pikpakClient.getDirectStreamUrlForFile(record.fileId, token)
                         val freshUrl = urlRes.getOrNull()
-                        if (!freshUrl.isNullOrBlank()) {
+                        val isThrottled = freshUrl?.contains("x_limited=1") == true || freshUrl?.contains("ms=102400") == true
+                        if (freshUrl != null && !isThrottled) {
+                            val isDownscaled = (record.quality.contains("1080", ignoreCase = true) || record.quality.contains("4k", ignoreCase = true) || record.quality.contains("2160", ignoreCase = true)) &&
+                                    (freshUrl.contains("category=transcoded", ignoreCase = true) || freshUrl.contains("category=transcode", ignoreCase = true))
+                            val qName = if (isDownscaled) "📽️ ${record.quality} ⬇" else "📽️ ${record.quality}"
                             val s = StremioStreamSource(
-                                name = "📽️ " + record.quality,
+                                name = qName,
                                 title = record.title,
                                 url = freshUrl,
                                 infoHash = record.infoHash,
@@ -308,6 +333,8 @@ class PikPakStreamResolver(
                                 send(accumulatedStreams.toList())
                                 Log.i(TAG, "⚡ Emitted valid cached stream: ${s.name}")
                             }
+                        } else {
+                            Log.w(TAG, "⚠️ Cached DB record for ${record.quality} was throttled or invalid, re-resolving...")
                         }
                     }
                 }
@@ -352,9 +379,15 @@ class PikPakStreamResolver(
         }
 
         // 6. Launch ALL remaining quality tier workers concurrently and EMIT 1-BY-1 INSTANTLY!
-        val workers = torrentsByQuality.mapIndexed { _, (quality, candidates) ->
+        val workers = torrentsByQuality.mapIndexed { workerIndex, (quality, candidates) ->
             launch(Dispatchers.IO) {
-                val assignedAccounts = accounts.ifEmpty { listOfNotNull(config.primaryAccount) }
+                // Assign dedicated accounts for each quality tier worker so they don't overfill the same account!
+                val accountSlice = if (accounts.size > workerIndex * 3) {
+                    accounts.drop(workerIndex * 3) + accounts.take(workerIndex * 3)
+                } else {
+                    accounts.shuffled()
+                }
+                val assignedAccounts = accountSlice.ifEmpty { listOfNotNull(config.primaryAccount) }
                 var qualityResolved = false
 
                 // Prioritize Hindi audio candidates first within quality tier!
@@ -381,10 +414,32 @@ class PikPakStreamResolver(
                             val authData = authRes.getOrNull()
                             val token = authData?.accessToken ?: pikpakClient.cachedAccessToken.orEmpty()
                             val fileRes = pikpakClient.addMagnetAndGetResolvedFile(magnetUrl = magnet, token = token)
-                            val resolvedFile = fileRes.getOrNull()
 
-                            if (resolvedFile != null && resolvedFile.streamUrl.isNotBlank()) {
+                            if (fileRes.isFailure) {
+                                val ex = fileRes.exceptionOrNull()
+                                val msg = ex?.message.orEmpty()
+                                if (msg.contains("limit", ignoreCase = true) || msg.contains("task_daily", ignoreCase = true) || msg.contains("403", ignoreCase = true) || msg.contains("space", ignoreCase = true)) {
+                                    Log.w(TAG, "[$quality] Account ${acc.username} quota limit exceeded: $msg")
+                                    if (postgresUrl.isNotBlank()) {
+                                        launch(Dispatchers.IO) { PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username) }
+                                    }
+                                    continue // Account is exhausted, try next account!
+                                }
+                            }
+
+                            val resolvedFile = fileRes.getOrNull()
+                            val streamUrl = resolvedFile?.streamUrl.orEmpty()
+                            val isThrottled = streamUrl.contains("x_limited=1") || streamUrl.contains("ms=102400") || streamUrl.contains("ms=1048576")
+
+                            if (resolvedFile != null && streamUrl.isNotBlank() && !isThrottled) {
                                 Log.i(TAG, "🎉 RESOLVED [$quality] -> EMITTING TO SCREEN NOW!")
+
+                                // Mark account as used immediately so other movies or workers don't overfill it!
+                                if (postgresUrl.isNotBlank()) {
+                                    launch(Dispatchers.IO) {
+                                        PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username)
+                                    }
+                                }
 
                                 // Save to PostgreSQL pikpak_v2 table asynchronously
                                 if (postgresUrl.isNotBlank()) {
@@ -412,8 +467,12 @@ class PikPakStreamResolver(
                                     }
                                 }
 
+                                val isDownscaled = (quality.contains("1080", ignoreCase = true) || quality.contains("4k", ignoreCase = true) || quality.contains("2160", ignoreCase = true)) &&
+                                        (resolvedFile.streamUrl.contains("category=transcoded", ignoreCase = true) || resolvedFile.streamUrl.contains("category=transcode", ignoreCase = true))
+                                val effectiveQualityName = if (isDownscaled) "📽️ $quality ⬇" else "📽️ $quality"
+
                                 val newStream = StremioStreamSource(
-                                    name = qualityName,
+                                    name = effectiveQualityName,
                                     title = torr.title ?: titleClean,
                                     url = resolvedFile.streamUrl,
                                     infoHash = infoHash,
@@ -426,12 +485,19 @@ class PikPakStreamResolver(
                                 }
                                 qualityResolved = true
                                 break // Quality resolved!
+                            } else if (isThrottled) {
+                                Log.w(TAG, "[$quality] Account ${acc.username} generated a throttled link, rotating account...")
+                                if (postgresUrl.isNotBlank()) {
+                                    launch(Dispatchers.IO) { PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username) }
+                                }
+                                continue
                             } else {
                                 // Magnet not cached in PikPak Cloud Drive -> Break account loop to try next candidate torrent!
                                 Log.d(TAG, "[$quality] Candidate [$infoHash] not instant-cached in cloud drive, trying next candidate...")
                                 break
                             }
                         } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
                             Log.e(TAG, "Error resolving candidate [$infoHash]", e)
                         }
                     }

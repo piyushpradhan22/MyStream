@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -16,11 +15,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -66,38 +64,27 @@ fun StreamCard(
     onClick: () -> Unit,
     onRestart: (() -> Unit)? = null,
     onMagnetStream: (() -> Unit)? = null,
-    onWatchlistToggle: (() -> Unit)? = null,
-    isSavedToWatchlist: Boolean = false,
+    onUp: (() -> Unit)? = null,
     actionButtonText: String = "⚡ Resolve",
     modifier: Modifier = Modifier
 ) {
     val cardFocusRequester = externalFocusRequester ?: remember { FocusRequester() }
     val magnetFocusRequester = remember { FocusRequester() }
     val restartFocusRequester = remember { FocusRequester() }
-    val watchlistFocusRequester = remember { FocusRequester() }
 
     val cardInteractionSource = remember { MutableInteractionSource() }
     val restartInteractionSource = remember { MutableInteractionSource() }
     val magnetInteractionSource = remember { MutableInteractionSource() }
-    val watchlistInteractionSource = remember { MutableInteractionSource() }
 
     val isCardFocused by cardInteractionSource.collectIsFocusedAsState()
     val isRestartFocused by restartInteractionSource.collectIsFocusedAsState()
     val isMagnetFocused by magnetInteractionSource.collectIsFocusedAsState()
-    val isWatchlistFocused by watchlistInteractionSource.collectIsFocusedAsState()
 
-    var hasSeedFocus by remember { mutableStateOf(false) }
+    val isAnyFocused = isCardFocused || isMagnetFocused || isRestartFocused
+    val borderColor = if (isAnyFocused) FocusRingOrange else Color(0x22FFFFFF)
+    val bgColor = if (isAnyFocused) FocusRingOrange.copy(alpha = 0.12f) else SurfaceCard
 
-    LaunchedEffect(isCardFocused) {
-        if (isCardFocused) {
-            hasSeedFocus = true
-        }
-    }
-
-    val shouldMarquee = isCardFocused
-
-    val borderColor = if (isCardFocused) FocusRingOrange else Color(0x22FFFFFF)
-    val bgColor = if (isCardFocused) FocusRingOrange.copy(alpha = 0.12f) else SurfaceCard
+    val shouldMarquee = isAnyFocused
 
     // Extract Torrent Name and File Name properly from title lines
     val titleLines = stream.title?.lines()?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
@@ -109,275 +96,119 @@ fun StreamCard(
     val fileName = stream.behaviorHints?.bingeGroup?.takeIf { it.isNotBlank() && it != torrentName }
         ?: titleLines.getOrNull(1)?.takeIf { !it.contains("💾") && !it.contains("👤") && it != torrentName }
 
-    Box(
+    // Outer Card Container: clean non-clickable Row containing Card Body & Action Buttons as direct siblings
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(bgColor)
-            .border(if (isCardFocused) 2.dp else 1.dp, borderColor, RoundedCornerShape(12.dp))
-            .focusRequester(cardFocusRequester)
-            .focusable(interactionSource = cardInteractionSource)
-            .onPreviewKeyEvent { keyEvent ->
-                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when (keyEvent.key) {
-                    Key.DirectionRight -> {
-                        if (onMagnetStream != null && !isResolving) {
-                            magnetFocusRequester.requestFocus()
-                            true
-                        } else if (onRestart != null && !isResolving) {
-                            restartFocusRequester.requestFocus()
-                            true
-                        } else {
-                            false
-                        }
-                    }
-
-                    else -> false
-                }
-            }
-            .clickable(
-                interactionSource = cardInteractionSource,
-                indication = null,
-                onClick = onClick
-            )
-            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .border(if (isAnyFocused) 2.dp else 1.dp, borderColor, RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Top Row: Badges on the Left, Action Buttons on the Right
+        // 1. Main Clickable Card Body (takes full remaining width)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .focusRequester(cardFocusRequester)
+                .onPreviewKeyEvent { keyEvent ->
+                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (keyEvent.key) {
+                        Key.DirectionRight -> {
+                            if (onMagnetStream != null && !isResolving) {
+                                magnetFocusRequester.safeRequestFocus()
+                                true
+                            } else if (onRestart != null && !isResolving) {
+                                restartFocusRequester.safeRequestFocus()
+                                true
+                            } else false
+                        }
+
+                        Key.DirectionUp -> {
+                            if (onUp != null) {
+                                onUp()
+                                true
+                            } else false
+                        }
+
+                        else -> false
+                    }
+                }
+                .clickable(
+                    interactionSource = cardInteractionSource,
+                    indication = null,
+                    onClick = onClick
+                )
+        ) {
+            // Badges (Quality, HDR, Hindi, Provider)
             Row(
-                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Badges (Quality, HDR, Hindi, Provider)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                // Quality Badge
+                val is4k = stream.quality.contains("4K")
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (is4k) AccentAmber else PrimaryNeon)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
-                    // Quality Badge
-                    val is4k = stream.quality.contains("4K")
+                    Text(
+                        text = stream.quality,
+                        color = if (is4k) Color.Black else Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // HDR Badge if available
+                stream.hdrType?.let { hdr ->
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
-                            .background(if (is4k) AccentAmber else PrimaryNeon)
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .background(SecondaryCyan.copy(alpha = 0.2f))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = stream.quality,
-                            color = if (is4k) Color.Black else Color.White,
-                            fontSize = 10.sp,
+                            text = hdr,
+                            color = SecondaryCyan,
+                            fontSize = 9.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
+                }
 
-                    // HDR Badge if available
-                    stream.hdrType?.let { hdr ->
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(SecondaryCyan.copy(alpha = 0.2f))
-                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = hdr,
-                                color = SecondaryCyan,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    // Hindi Audio Badge if available
-                    if (stream.hasHindiAudio) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFFE65100))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "🇮🇳 HINDI",
-                                color = Color.White,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-                    }
-
-                    // Provider Name (e.g. PP)
-                    stream.providerName?.let { provider ->
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0x33FFFFFF))
-                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = provider,
-                                color = TextSecondary,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
+                // Hindi Audio Badge if available
+                if (stream.hasHindiAudio) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFFE65100))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "🇮🇳 HINDI",
+                            color = Color.White,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
                     }
                 }
 
-                // Top Right: Magnet P2P, Loading Spinner, or Restart Button
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    // Direct P2P Magnet Stream button
-                    if (onMagnetStream != null && !isResolving) {
-                        Box(
-                            modifier = Modifier
-                                .focusRequester(magnetFocusRequester)
-                                .focusable(interactionSource = magnetInteractionSource)
-                                .onPreviewKeyEvent { keyEvent ->
-                                    val isSelectKey = keyEvent.key == Key.DirectionCenter ||
-                                        keyEvent.key == Key.Enter ||
-                                        keyEvent.key == Key.NumPadEnter ||
-                                        keyEvent.key == Key.Spacebar
-
-                                    if (isSelectKey) {
-                                        if (keyEvent.type == KeyEventType.KeyUp) {
-                                            onMagnetStream()
-                                        }
-                                        return@onPreviewKeyEvent true
-                                    }
-
-                                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                    when (keyEvent.key) {
-                                        Key.DirectionLeft -> {
-                                            cardFocusRequester.safeRequestFocus()
-                                            true
-                                        }
-
-                                        Key.DirectionRight -> {
-                                            if (onWatchlistToggle != null) {
-                                                watchlistFocusRequester.safeRequestFocus()
-                                                true
-                                            } else if (onRestart != null) {
-                                                restartFocusRequester.safeRequestFocus()
-                                                true
-                                            } else {
-                                                false
-                                            }
-                                        }
-
-                                        else -> false
-                                    }
-                                }
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (isMagnetFocused) AccentAmber.copy(alpha = 0.35f) else AccentAmber.copy(alpha = 0.2f))
-                                .border(
-                                    if (isMagnetFocused) 2.dp else 1.dp,
-                                    if (isMagnetFocused) FocusRingOrange else AccentAmber.copy(alpha = 0.5f),
-                                    RoundedCornerShape(6.dp)
-                                )
-                                .clickable(interactionSource = magnetInteractionSource, indication = null) { onMagnetStream() }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = actionButtonText,
-                                color = if (isMagnetFocused) FocusRingOrange else AccentAmber,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    // Watchlist button
-                    if (onWatchlistToggle != null) {
-                        Box(
-                            modifier = Modifier
-                                .focusRequester(watchlistFocusRequester)
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .background(if (isWatchlistFocused) FocusRingOrange.copy(alpha = 0.25f) else SurfaceDark)
-                                .border(
-                                    if (isWatchlistFocused) 2.dp else 1.dp,
-                                    if (isWatchlistFocused) FocusRingOrange else if (isSavedToWatchlist) SecondaryCyan else Color(0x33FFFFFF),
-                                    CircleShape
-                                )
-                                .focusable(interactionSource = watchlistInteractionSource)
-                                .clickable(
-                                    interactionSource = watchlistInteractionSource,
-                                    indication = null,
-                                    onClick = onWatchlistToggle
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (isSavedToWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                                contentDescription = "Toggle Watchlist",
-                                tint = if (isWatchlistFocused) FocusRingOrange else if (isSavedToWatchlist) SecondaryCyan else TextMuted,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    if (isResolving) {
-                        CircularProgressIndicator(
-                            color = FocusRingOrange,
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
+                // Provider Name (e.g. PP)
+                stream.providerName?.let { provider ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0x33FFFFFF))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = provider,
+                            color = TextSecondary,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Medium
                         )
-                    } else if (onRestart != null) {
-                        Box(
-                            modifier = Modifier
-                                .focusRequester(restartFocusRequester)
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(if (isRestartFocused) FocusRingOrange.copy(alpha = 0.25f) else SurfaceDark)
-                                .border(
-                                    if (isRestartFocused) 2.dp else 1.dp,
-                                    if (isRestartFocused) FocusRingOrange else Color(0x33FFFFFF),
-                                    CircleShape
-                                )
-                                .focusable(interactionSource = restartInteractionSource)
-                                .onPreviewKeyEvent { keyEvent ->
-                                    val isSelectKey = keyEvent.key == Key.DirectionCenter ||
-                                        keyEvent.key == Key.Enter ||
-                                        keyEvent.key == Key.NumPadEnter ||
-                                        keyEvent.key == Key.Spacebar
-
-                                    if (isSelectKey) {
-                                        if (keyEvent.type == KeyEventType.KeyUp) {
-                                            onRestart()
-                                        }
-                                        return@onPreviewKeyEvent true
-                                    }
-
-                                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                    when (keyEvent.key) {
-                                        Key.DirectionLeft -> {
-                                            if (onMagnetStream != null && !isResolving) {
-                                                magnetFocusRequester.safeRequestFocus()
-                                            } else {
-                                                cardFocusRequester.safeRequestFocus()
-                                            }
-                                            true
-                                        }
-
-                                        else -> false
-                                    }
-                                }
-                                .clickable(
-                                    interactionSource = restartInteractionSource,
-                                    indication = null,
-                                    onClick = onRestart
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Replay,
-                                contentDescription = "Restart from Beginning",
-                                tint = if (isRestartFocused) FocusRingOrange else TextSecondary,
-                                modifier = Modifier.size(17.dp)
-                            )
-                        }
                     }
                 }
             }
@@ -423,6 +254,141 @@ fun StreamCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+        }
+
+        // 2. Action Buttons (Direct Sibling to Card Body -> Seamless D-pad Focus)
+        if (isResolving || onMagnetStream != null || onRestart != null) {
+            Spacer(modifier = Modifier.width(10.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Direct P2P Magnet Stream button
+                if (onMagnetStream != null && !isResolving) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isMagnetFocused) AccentAmber.copy(alpha = 0.35f) else AccentAmber.copy(alpha = 0.2f))
+                            .border(
+                                if (isMagnetFocused) 2.dp else 1.dp,
+                                if (isMagnetFocused) FocusRingOrange else AccentAmber.copy(alpha = 0.5f),
+                                RoundedCornerShape(6.dp)
+                            )
+                            .focusRequester(magnetFocusRequester)
+                            .onPreviewKeyEvent { keyEvent ->
+                                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                when (keyEvent.key) {
+                                    Key.DirectionCenter,
+                                    Key.Enter,
+                                    Key.NumPadEnter,
+                                    Key.Spacebar -> {
+                                        onMagnetStream()
+                                        true
+                                    }
+
+                                    Key.DirectionLeft -> {
+                                        cardFocusRequester.safeRequestFocus()
+                                        true
+                                    }
+
+                                    Key.DirectionRight -> {
+                                        if (onRestart != null) {
+                                            restartFocusRequester.safeRequestFocus()
+                                            true
+                                        } else false
+                                    }
+
+                                    Key.DirectionUp -> {
+                                        if (onUp != null) {
+                                            onUp()
+                                            true
+                                        } else false
+                                    }
+
+                                    else -> false
+                                }
+                            }
+                            .clickable(
+                                interactionSource = magnetInteractionSource,
+                                indication = null,
+                                onClick = onMagnetStream
+                            )
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = actionButtonText,
+                            color = if (isMagnetFocused) FocusRingOrange else AccentAmber,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (isResolving) {
+                    CircularProgressIndicator(
+                        color = FocusRingOrange,
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else if (onRestart != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(if (isRestartFocused) FocusRingOrange.copy(alpha = 0.25f) else SurfaceDark)
+                            .border(
+                                if (isRestartFocused) 2.dp else 1.dp,
+                                if (isRestartFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                CircleShape
+                            )
+                            .focusRequester(restartFocusRequester)
+                            .onPreviewKeyEvent { keyEvent ->
+                                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                when (keyEvent.key) {
+                                    Key.DirectionCenter,
+                                    Key.Enter,
+                                    Key.NumPadEnter,
+                                    Key.Spacebar -> {
+                                        onRestart()
+                                        true
+                                    }
+
+                                    Key.DirectionLeft -> {
+                                        if (onMagnetStream != null && !isResolving) {
+                                            magnetFocusRequester.safeRequestFocus()
+                                        } else {
+                                            cardFocusRequester.safeRequestFocus()
+                                        }
+                                        true
+                                    }
+
+                                    Key.DirectionUp -> {
+                                        if (onUp != null) {
+                                            onUp()
+                                            true
+                                        } else false
+                                    }
+
+                                    else -> false
+                                }
+                            }
+                            .clickable(
+                                interactionSource = restartInteractionSource,
+                                indication = null,
+                                onClick = onRestart
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Replay,
+                            contentDescription = "Restart from Beginning",
+                            tint = if (isRestartFocused) FocusRingOrange else TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
         }
     }

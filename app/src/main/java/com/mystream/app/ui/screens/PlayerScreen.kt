@@ -313,7 +313,7 @@ fun PlayerScreen(
 
         isUserSeeking = true
         sliderPosition = newTarget.toFloat()
-        showControls = true
+        // Do NOT open overlay controls during D-Pad seek so focus is not stolen from seeking
 
         val sign = if (accumulatedSeekDeltaMs >= 0) "+" else "-"
         val absSec = kotlin.math.abs(accumulatedSeekDeltaMs) / 1000L
@@ -323,7 +323,7 @@ fun PlayerScreen(
 
         pendingSeekJob?.cancel()
         pendingSeekJob = coroutineScope.launch {
-            delay(750) // Wait for user to stop pressing D-Pad navigation buttons
+            delay(650) // Wait for user to stop pressing D-Pad navigation buttons
             playerManager.seekTo(newTarget)
             isUserSeeking = false
             pendingSeekTargetMs = null
