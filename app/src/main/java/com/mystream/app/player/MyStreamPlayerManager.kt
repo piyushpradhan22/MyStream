@@ -86,12 +86,32 @@ class MyStreamPlayerManager(
         setMediaCodecSelector(MediaCodecSelector.DEFAULT)
     }
 
-    private val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+    private val playerOkHttpClient = OkHttpClient.Builder()
+        .dns(com.mystream.app.data.api.SystemFallbackDns)
+        .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+        .connectTimeout(25, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(25, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
+        .addNetworkInterceptor { chain ->
+            val req = chain.request()
+            Log.d(TAG, "Stream HTTP -> ${req.method} ${req.url}")
+            try {
+                val res = chain.proceed(req)
+                Log.i(TAG, "Stream HTTP <- ${res.code} (len=${res.header("Content-Length")}, range=${res.header("Content-Range")}, type=${res.header("Content-Type")})")
+                res
+            } catch (e: Exception) {
+                Log.e(TAG, "Stream HTTP FAIL -> ${e.message} for ${req.url}", e)
+                throw e
+            }
+        }
+        .build()
+
+    private val httpDataSourceFactory = OkHttpDataSource.Factory(playerOkHttpClient)
         .setUserAgent("ANDROID-com.pikcloud.pikpak/1.47.1")
-        .setAllowCrossProtocolRedirects(true)
-        .setConnectTimeoutMs(25_000)
-        .setReadTimeoutMs(35_000)
-        .setKeepPostFor302Redirects(true)
         .setTransferListener(bandwidthMeter)
 
     private val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
@@ -292,6 +312,12 @@ class MyStreamPlayerManager(
         _errorMessage.value = null
         val actualStartPos = startPositionMs ?: item.startPositionMs
         Log.i(TAG, "Playing media (start at ${actualStartPos}ms): ${item.title} -> ${item.mediaUrl}")
+
+        val reqProps = mutableMapOf<String, String>()
+        reqProps["User-Agent"] = "ANDROID-com.pikcloud.pikpak/1.47.1"
+        item.headers?.forEach { (k, v) -> reqProps[k] = v }
+        httpDataSourceFactory.setDefaultRequestProperties(reqProps)
+
         val uri = Uri.parse(item.mediaUrl)
 
         val metadata = MediaMetadata.Builder()

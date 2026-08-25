@@ -437,11 +437,10 @@ class PikPakStreamResolver(
                                 continue // try next account if login failed
                             }
 
-                            val authData = authRes.getOrNull()
-                            val token = authData?.accessToken ?: pikpakClient.cachedAccessToken.orEmpty()
+                            val session = authRes.getOrNull() ?: continue
                             val fileRes = pikpakClient.addMagnetAndGetResolvedFile(
                                 magnetUrl = magnet,
-                                token = token,
+                                session = session,
                                 targetFileName = torr.behaviorHints?.bingeGroup ?: torr.title
                             )
 
@@ -592,8 +591,8 @@ class PikPakStreamResolver(
                     continue
                 }
 
-                val token = pikpakClient.cachedAccessToken.orEmpty()
-                val fileRes = pikpakClient.addMagnetAndGetResolvedFile(magnetUrl = magnet, token = token)
+                val session = authRes.getOrNull() ?: continue
+                val fileRes = pikpakClient.addMagnetAndGetResolvedFile(magnetUrl = magnet, session = session)
                 val resolvedFile = fileRes.getOrNull()
 
                 if (resolvedFile != null && resolvedFile.streamUrl.isNotBlank()) {

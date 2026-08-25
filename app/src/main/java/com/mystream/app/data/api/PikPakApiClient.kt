@@ -29,6 +29,15 @@ data class PikPakAuthResponse(
     @SerialName("error_description") val errorDescription: String? = null
 )
 
+data class PikPakAuthSession(
+    val username: String,
+    val accessToken: String,
+    val refreshToken: String = "",
+    val userId: String = "",
+    val deviceId: String = UUID.randomUUID().toString().replace("-", ""),
+    val loginTime: Double = System.currentTimeMillis() / 1000.0
+)
+
 data class PikPakResolvedFile(
     val fileId: String,
     val baseFileId: String,
@@ -107,7 +116,8 @@ class PikPakApiClient(
     private suspend fun captchaInit(
         action: String,
         userId: String = this.userId ?: "",
-        username: String = ""
+        username: String = "",
+        deviceId: String = this.deviceId
     ): String? = withContext(Dispatchers.IO) {
         val url = "https://$PIKPAK_USER_HOST/v1/shield/captcha/init"
         val timestamp = System.currentTimeMillis().toString()
@@ -159,14 +169,15 @@ class PikPakApiClient(
     suspend fun login(
         username: String,
         pass: String
-    ): Result<PikPakAuthResponse> = withContext(Dispatchers.IO) {
+    ): Result<PikPakAuthSession> = withContext(Dispatchers.IO) {
         if (username.isBlank() || pass.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("Username and password cannot be blank"))
         }
 
+        val sessionDeviceId = UUID.randomUUID().toString().replace("-", "")
         Log.d(TAG, "Signing into PikPak with account: $username")
         val loginUrl = "https://$PIKPAK_USER_HOST/v1/auth/signin"
-        val captchaToken = captchaInit("POST:$loginUrl", username = username.trim()) ?: ""
+        val captchaToken = captchaInit("POST:$loginUrl", username = username.trim(), deviceId = sessionDeviceId) ?: ""
 
         val formBodyBuilder = FormBody.Builder()
             .add("client_id", CLIENT_ID)
@@ -189,13 +200,21 @@ class PikPakApiClient(
                 val body = response.body?.string() ?: throw IOException("Empty response from PikPak Auth")
                 val authRes = json.decodeFromString<PikPakAuthResponse>(body)
                 if (authRes.accessToken.isNotBlank()) {
-                    cachedAccessToken = authRes.accessToken
-                    cachedRefreshToken = authRes.refreshToken
-                    userId = authRes.userId
-                    currentUsername = username
-                    loginTime = System.currentTimeMillis() / 1000.0
-                    Log.i(TAG, "PikPak Login SUCCESSFUL! User ID: ${authRes.userId}")
-                    Result.success(authRes)
+                    val session = PikPakAuthSession(
+                        username = username.trim(),
+                        accessToken = authRes.accessToken,
+                        refreshToken = authRes.refreshToken,
+                        userId = authRes.userId,
+                        deviceId = sessionDeviceId,
+                        loginTime = System.currentTimeMillis() / 1000.0
+                    )
+                    cachedAccessToken = session.accessToken
+                    cachedRefreshToken = session.refreshToken
+                    userId = session.userId
+                    currentUsername = session.username
+                    loginTime = session.loginTime
+                    Log.i(TAG, "PikPak Login SUCCESSFUL for ${session.username}! User ID: ${session.userId}")
+                    Result.success(session)
                 } else {
                     val err = authRes.errorDescription ?: authRes.error ?: "PikPak Auth Failed"
                     Log.w(TAG, "PikPak Login FAILED: $err")
@@ -218,16 +237,16 @@ class PikPakApiClient(
 
     suspend fun addMagnetAndGetResolvedFile(
         magnetUrl: String,
-        token: String = cachedAccessToken ?: "",
+        session: PikPakAuthSession,
         targetFileName: String? = null
     ): Result<PikPakResolvedFile> = withContext(Dispatchers.IO) {
-        if (token.isBlank()) {
+        if (session.accessToken.isBlank()) {
             return@withContext Result.failure(IllegalStateException("Not authenticated with PikPak"))
         }
 
-        Log.d(TAG, "Adding magnet to PikPak drive: ${magnetUrl.take(60)}...")
+        Log.d(TAG, "Adding magnet to PikPak drive for ${session.username}: ${magnetUrl.take(60)}...")
         val url = "https://$PIKPAK_API_HOST/drive/v1/files"
-        val captchaToken = captchaInit("POST:$url", userId = userId.orEmpty()) ?: ""
+        val captchaToken = captchaInit("POST:$url", userId = session.userId, deviceId = session.deviceId) ?: ""
 
         val payload = """
             {
@@ -242,9 +261,9 @@ class PikPakApiClient(
         val reqBuilder = Request.Builder()
             .url(url)
             .post(payload.toRequestBody(jsonMediaType))
-            .header("Authorization", "Bearer $token")
+            .header("Authorization", "Bearer ${session.accessToken}")
             .header("Content-Type", "application/json")
-            .header("X-Device-Id", deviceId)
+            .header("X-Device-Id", session.deviceId)
             .header("User-Agent", "ANDROID-$PACKAGE_NAME/$CLIENT_VERSION")
 
         if (captchaToken.isNotBlank()) {
@@ -284,7 +303,7 @@ class PikPakApiClient(
                         val taskListReq = Request.Builder()
                             .url("https://$PIKPAK_API_HOST/drive/v1/tasks?type=offline&limit=20&filters=%7B%22phase%22%3A%7B%22in%22%3A%22PHASE_TYPE_RUNNING%2CPHASE_TYPE_COMPLETE%2CPHASE_TYPE_PENDING%22%7D%7D")
                             .get()
-                            .header("Authorization", "Bearer $token")
+                            .header("Authorization", "Bearer ${session.accessToken}")
                             .build()
                         try {
                             client.newCall(taskListReq).execute().use { tRes ->
@@ -316,18 +335,18 @@ class PikPakApiClient(
 
                 val finalFileId = fileId
                 if (!finalFileId.isNullOrBlank()) {
-                    val streamResult = getDirectStreamUrlForFile(finalFileId, token, targetFileName)
+                    val streamResult = getDirectStreamUrlForFile(finalFileId, session.accessToken, targetFileName)
                     return@withContext streamResult.map { streamUrl ->
                         PikPakResolvedFile(
                             fileId = finalFileId,
                             baseFileId = baseFileId,
                             streamUrl = streamUrl,
-                            username = currentUsername.orEmpty(),
-                            accessToken = cachedAccessToken.orEmpty(),
-                            refreshToken = cachedRefreshToken.orEmpty(),
-                            userId = userId.orEmpty(),
-                            deviceId = deviceId,
-                            loginTime = loginTime
+                            username = session.username,
+                            accessToken = session.accessToken,
+                            refreshToken = session.refreshToken,
+                            userId = session.userId,
+                            deviceId = session.deviceId,
+                            loginTime = session.loginTime
                         )
                     }
                 }
@@ -338,6 +357,22 @@ class PikPakApiClient(
             Log.e(TAG, "addMagnetAndGetResolvedFile error", e)
             Result.failure(e)
         }
+    }
+
+    suspend fun addMagnetAndGetResolvedFile(
+        magnetUrl: String,
+        token: String = cachedAccessToken ?: "",
+        targetFileName: String? = null
+    ): Result<PikPakResolvedFile> {
+        val session = PikPakAuthSession(
+            username = currentUsername.orEmpty(),
+            accessToken = token,
+            refreshToken = cachedRefreshToken.orEmpty(),
+            userId = userId.orEmpty(),
+            deviceId = deviceId,
+            loginTime = loginTime
+        )
+        return addMagnetAndGetResolvedFile(magnetUrl, session, targetFileName)
     }
 
     suspend fun getDirectStreamUrlForFile(

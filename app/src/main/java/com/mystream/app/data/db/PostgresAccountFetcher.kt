@@ -227,9 +227,11 @@ object PostgresAccountFetcher {
             val emails = mutableListOf<String>()
 
             val candidateQueries = listOf(
+                "SELECT email FROM selected_email LIMIT 100",
+                "SELECT email FROM email WHERE used IS NOT TRUE AND email LIKE '%@gmail.com' LIMIT 100",
+                "SELECT email FROM email WHERE email LIKE '%@gmail.com' LIMIT 100",
                 "SELECT email FROM email WHERE used IS NOT TRUE LIMIT 100",
-                "SELECT email FROM email LIMIT 100",
-                "SELECT email FROM selected_email LIMIT 100"
+                "SELECT email FROM email LIMIT 100"
             )
 
             for (q in candidateQueries) {
@@ -237,7 +239,10 @@ object PostgresAccountFetcher {
                     val rows = executePgQuery(config, q)
                     for (row in rows) {
                         if (row.isNotEmpty() && row[0].isNotBlank()) {
-                            emails.add(row[0].trim())
+                            val em = row[0].trim()
+                            if (em.contains("@")) {
+                                emails.add(em)
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -305,7 +310,7 @@ object PostgresAccountFetcher {
                     )
                 }
             }
-            Log.i(TAG, "Found ${list.size} records in pikpak_v2 table for $imdbId")
+            Log.i(TAG, "Found ${list.size} records in pikpak_v2 table for $imdbId: ${list.joinToString { "${it.quality}: ${it.username} (userId=${it.userId}, fileId=${it.fileId})" }}")
         } catch (e: Exception) {
             Log.w(TAG, "getPikpakV2Records error for $imdbId", e)
         }
