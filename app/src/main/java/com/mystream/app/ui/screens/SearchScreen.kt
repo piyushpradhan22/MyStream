@@ -74,10 +74,13 @@ import com.mystream.app.ui.theme.SurfaceDark
 import com.mystream.app.ui.theme.TextMuted
 import com.mystream.app.ui.theme.TextPrimary
 import com.mystream.app.ui.theme.TextSecondary
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 object SearchStateHolder {
@@ -155,33 +158,62 @@ fun SearchScreen(
     }
 
     fun performSearch(text: String) {
-        searchJob?.cancel()
         val clean = text.trim()
         if (clean.isBlank()) {
+            searchJob?.cancel()
             rawResults = emptyList()
             isSearching = false
             return
         }
 
-        isSearching = true
+        searchJob?.cancel()
         searchJob = scope.launch {
             delay(250)
+            isSearching = true
             try {
-                coroutineScope {
-                    val movieDeferred = async {
+                // 1. Instant local search in Indian catalog if query matches
+                val localMatches = repository.searchIndianCatalog(clean)
+
+                // 2. Fetch Cinemeta movie and series catalogs concurrently with individual error handling
+                val movieDeferred = async(Dispatchers.IO) {
+                    try {
                         repository.fetchCatalog("movie", "top", search = clean).metas
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        emptyList()
                     }
-                    val seriesDeferred = async {
-                        repository.fetchCatalog("series", "top", search = clean).metas
-                    }
-                    val movieResults = movieDeferred.await()
-                    val seriesResults = seriesDeferred.await()
-                    rawResults = (movieResults + seriesResults).distinctBy { it.id }
                 }
-            } catch (_: Exception) {
-                rawResults = emptyList()
+
+                val seriesDeferred = async(Dispatchers.IO) {
+                    try {
+                        repository.fetchCatalog("series", "top", search = clean).metas
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+
+                val movieResults = movieDeferred.await()
+                val seriesResults = seriesDeferred.await()
+
+                val combined = (localMatches + movieResults + seriesResults).distinctBy { it.id }
+                if (isActive) {
+                    rawResults = combined
+                }
+            } catch (e: CancellationException) {
+                // DO NOT wipe rawResults on cancellation! A newer search job is already running.
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("SearchScreen", "Search error for '$clean'", e)
+                if (isActive) {
+                    rawResults = emptyList()
+                }
             } finally {
-                isSearching = false
+                if (isActive) {
+                    isSearching = false
+                }
             }
         }
     }

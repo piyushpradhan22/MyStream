@@ -431,6 +431,20 @@ class SourcesRepository(
         return StremioCatalogResponse(metas = paged)
     }
 
+    suspend fun searchIndianCatalog(query: String): List<StremioMetaPreview> = withContext(Dispatchers.IO) {
+        val q = query.trim().lowercase()
+        if (q.isBlank()) return@withContext emptyList()
+        val data = loadIndianCatalogData()
+        data.values.flatten()
+            .filter { item ->
+                item.name.lowercase().contains(q) ||
+                item.description?.lowercase()?.contains(q) == true
+            }
+            .distinctBy { it.id }
+            .take(20)
+            .map { it.toStremioMetaPreview() }
+    }
+
     suspend fun fetchCatalog(
         type: String,
         catalogId: String = "top",
