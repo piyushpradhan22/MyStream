@@ -89,39 +89,39 @@ class AppUpdateManager(private val context: Context) {
             val currentName = BuildConfig.VERSION_NAME
             android.util.Log.d("AppUpdateManager", "Checking updates... Current app: v$currentName (code $currentCode)")
 
-            // 1. Try real-time GitHub Contents API for version.json (instant, 0 CDN cache delay)
-            val contentsResult = tryFetchGitHubContentsVersion(currentCode, currentName)
-            if (contentsResult != null) {
-                android.util.Log.d("AppUpdateManager", "Fetched GitHub Contents version.json: available=${contentsResult.isUpdateAvailable}, latest=v${contentsResult.latestVersionName}")
-                return@withContext Result.success(contentsResult)
-            }
-
-            // 2. Try GitHub Releases API
+            // 1. Primary: Check GitHub Releases API (directly from git tags & releases)
             val githubResult = tryFetchGitHubRelease(currentCode, currentName)
-            if (githubResult != null) {
-                android.util.Log.d("AppUpdateManager", "Fetched GitHub release: available=${githubResult.isUpdateAvailable}, latest=v${githubResult.latestVersionName}")
+            if (githubResult != null && githubResult.isUpdateAvailable) {
+                android.util.Log.d("AppUpdateManager", "GitHub release update available: v${githubResult.latestVersionName}")
                 return@withContext Result.success(githubResult)
             }
 
-            // 3. Try Raw version.json
+            // 2. Secondary: Check GitHub Contents API for version.json (instant live file)
+            val contentsResult = tryFetchGitHubContentsVersion(currentCode, currentName)
+            if (contentsResult != null && contentsResult.isUpdateAvailable) {
+                android.util.Log.d("AppUpdateManager", "GitHub Contents version.json update available: v${contentsResult.latestVersionName}")
+                return@withContext Result.success(contentsResult)
+            }
+
+            // 3. Tertiary: Check Raw version.json
             val rawResult = tryFetchRawVersionJson(currentCode, currentName)
-            if (rawResult != null) {
-                android.util.Log.d("AppUpdateManager", "Fetched raw version.json: available=${rawResult.isUpdateAvailable}, latest=v${rawResult.latestVersionName}")
+            if (rawResult != null && rawResult.isUpdateAvailable) {
+                android.util.Log.d("AppUpdateManager", "Raw version.json update available: v${rawResult.latestVersionName}")
                 return@withContext Result.success(rawResult)
             }
 
-            android.util.Log.d("AppUpdateManager", "No remote releases found; reporting up to date.")
-            Result.success(
-                AppUpdateCheckResult(
-                    isUpdateAvailable = false,
-                    currentVersionName = currentName,
-                    currentVersionCode = currentCode,
-                    latestVersionName = currentName,
-                    latestVersionCode = currentCode,
-                    downloadUrl = "",
-                    changelog = "You are using the latest version."
-                )
+            // If no updates available across all sources, report latest version info
+            val fallback = githubResult ?: contentsResult ?: rawResult ?: AppUpdateCheckResult(
+                isUpdateAvailable = false,
+                currentVersionName = currentName,
+                currentVersionCode = currentCode,
+                latestVersionName = currentName,
+                latestVersionCode = currentCode,
+                downloadUrl = "",
+                changelog = "You are using the latest version."
             )
+
+            Result.success(fallback.copy(isUpdateAvailable = false))
         } catch (e: Exception) {
             android.util.Log.e("AppUpdateManager", "Error checking updates", e)
             Result.failure(e)
