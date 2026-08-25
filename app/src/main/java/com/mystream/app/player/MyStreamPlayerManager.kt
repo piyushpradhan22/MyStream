@@ -71,7 +71,7 @@ class MyStreamPlayerManager(
                 .setSelectUndeterminedTextLanguage(false)
                 .setExceedVideoConstraintsIfNecessary(true)
                 .setExceedRendererCapabilitiesIfNecessary(false) // Never force-pick unsupported audio tracks (e.g. TrueHD 7.1)
-                .setExceedAudioConstraintsIfNecessary(false)
+                .setExceedAudioConstraintsIfNecessary(true)
                 .setAllowVideoMixedMimeTypeAdaptiveness(true)
                 .setAllowVideoNonSeamlessAdaptiveness(true)
                 .setMaxVideoBitrate(Int.MAX_VALUE)
@@ -444,6 +444,16 @@ class MyStreamPlayerManager(
         _subtitleTracks.value = subList
         _videoResolutions.value = resolutions
         _isSubtitleEnabled.value = subList.any { it.isSelected }
+
+        // Make sure we go with the default/1st supported audio track if no track was selected by language preferences
+        if (audioList.isNotEmpty()) {
+            val selectedAudio = audioList.firstOrNull { it.isSelected }
+            if (selectedAudio == null) {
+                val fallbackTrack = audioList.firstOrNull { it.isSupported } ?: audioList.first()
+                Log.i(TAG, "No audio track selected by language preferences. Auto-selecting default/1st audio track: ${fallbackTrack.label}")
+                selectAudioTrack(fallbackTrack)
+            }
+        }
     }
 
     fun selectAudioTrack(trackInfo: PlayerTrackInfo) {
@@ -494,6 +504,7 @@ class MyStreamPlayerManager(
         val audioLangs = when (preferredAudio.lowercase()) {
             "hindi" -> arrayOf("hin", "hi", "hindi", "eng", "en", "english")
             "english" -> arrayOf("eng", "en", "english", "hin", "hi", "hindi")
+            "original" -> emptyArray()
             else -> arrayOf("hin", "hi", "hindi", "eng", "en", "english")
         }
         val subLangs = when (preferredSubtitle.lowercase()) {
@@ -504,6 +515,7 @@ class MyStreamPlayerManager(
 
         val builder = trackSelector.buildUponParameters()
             .setPreferredAudioLanguages(*audioLangs)
+            .setExceedAudioConstraintsIfNecessary(true)
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !subtitlesEnabled)
 
         if (subtitlesEnabled) {

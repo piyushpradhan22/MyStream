@@ -87,9 +87,10 @@ object PostgresAccountFetcher {
             SystemFallbackDns.lookup(config.host).firstOrNull() ?: throw e
         }
         val socket = Socket(address, config.port)
-        socket.soTimeout = 12000
+        socket.soTimeout = 20000
         var inStream = DataInputStream(socket.getInputStream())
         var outStream = DataOutputStream(socket.getOutputStream())
+        var activeSocket: Socket = socket
 
         // 1. SSLRequest
         outStream.writeInt(8)
@@ -108,7 +109,9 @@ object PostgresAccountFetcher {
             val factory = sslContext.socketFactory
 
             val sslSocket = factory.createSocket(socket, config.host, config.port, true) as SSLSocket
+            sslSocket.soTimeout = 20000
             sslSocket.startHandshake()
+            activeSocket = sslSocket
             inStream = DataInputStream(sslSocket.getInputStream())
             outStream = DataOutputStream(sslSocket.getOutputStream())
             Log.d(TAG, "SSL Handshake successful")
@@ -166,7 +169,7 @@ object PostgresAccountFetcher {
                 }
             } else if (type == 'E') {
                 val errorMsg = String(payload)
-                socket.close()
+                activeSocket.close()
                 Log.e(TAG, "PostgreSQL Server Error: $errorMsg")
                 throw Exception("Postgres Error: $errorMsg")
             } else if (type == 'Z') {
@@ -209,7 +212,7 @@ object PostgresAccountFetcher {
             }
         }
 
-        socket.close()
+        activeSocket.close()
         Log.d(TAG, "Query returned ${rows.size} rows")
         return rows
     }
@@ -224,10 +227,9 @@ object PostgresAccountFetcher {
             val emails = mutableListOf<String>()
 
             val candidateQueries = listOf(
-                "SELECT email FROM email WHERE used IS NOT TRUE AND email LIKE '%@gmail.com' ORDER BY RANDOM() LIMIT 20",
-                "SELECT email FROM email WHERE email LIKE '%@gmail.com' ORDER BY RANDOM() LIMIT 20",
-                "SELECT email FROM email WHERE email IS NOT NULL AND email != '' ORDER BY RANDOM() LIMIT 20",
-                "SELECT email FROM selected_email WHERE email IS NOT NULL AND email != '' ORDER BY RANDOM() LIMIT 20"
+                "SELECT email FROM email WHERE used IS NOT TRUE LIMIT 100",
+                "SELECT email FROM email LIMIT 100",
+                "SELECT email FROM selected_email LIMIT 100"
             )
 
             for (q in candidateQueries) {
@@ -245,8 +247,9 @@ object PostgresAccountFetcher {
             }
 
             if (emails.isNotEmpty()) {
-                Log.i(TAG, "Successfully loaded ${emails.size} dynamic accounts from database: ${emails.take(3)}...")
-                Result.success(emails.distinct())
+                val chosen = emails.distinct().shuffled().take(20)
+                Log.i(TAG, "Successfully loaded ${chosen.size} dynamic accounts from database: ${chosen.take(3)}...")
+                Result.success(chosen)
             } else {
                 Result.failure(Exception("Connected to database, but no emails found in email/selected_email tables."))
             }
@@ -305,6 +308,49 @@ object PostgresAccountFetcher {
             Log.i(TAG, "Found ${list.size} records in pikpak_v2 table for $imdbId")
         } catch (e: Exception) {
             Log.w(TAG, "getPikpakV2Records error for $imdbId", e)
+        }
+        list
+    }
+
+    suspend fun getPikpakV2RecordsForInfoHashes(postgresUrl: String, infoHashes: List<String>): List<PikPakV2Record> = withContext(Dispatchers.IO) {
+        if (postgresUrl.isBlank() || infoHashes.isEmpty()) return@withContext emptyList()
+
+        val list = mutableListOf<PikPakV2Record>()
+        try {
+            val config = parseUrl(postgresUrl)
+            val cleanHashes = infoHashes.filter { it.isNotBlank() }.map { "'" + it.replace("'", "''") + "'" }
+            if (cleanHashes.isEmpty()) return@withContext emptyList()
+
+            val query = "SELECT imdb_id, quality, title, filename, file_id, size, file_extension, \"infoHash\", type, username, encoded_token, access_token, refresh_token, user_id, device_id, login_time, base_file_id FROM pikpak_v2 WHERE \"infoHash\" IN (${cleanHashes.joinToString(",")}) LIMIT 50"
+            val rows = executePgQuery(config, query)
+            for (r in rows) {
+                if (r.size >= 17 && r[4].isNotBlank()) {
+                    list.add(
+                        PikPakV2Record(
+                            imdbId = r[0],
+                            quality = r[1],
+                            title = r[2],
+                            filename = r[3],
+                            fileId = r[4],
+                            size = r[5],
+                            fileExtension = r[6],
+                            infoHash = r[7],
+                            type = r[8],
+                            username = r[9],
+                            encodedToken = r[10],
+                            accessToken = r[11],
+                            refreshToken = r[12],
+                            userId = r[13],
+                            deviceId = r[14],
+                            loginTime = r[15].toDoubleOrNull() ?: 0.0,
+                            baseFileId = r[16]
+                        )
+                    )
+                }
+            }
+            Log.i(TAG, "Found ${list.size} matching infoHash records in pikpak_v2 table for reuse")
+        } catch (e: Exception) {
+            Log.w(TAG, "getPikpakV2RecordsForInfoHashes error", e)
         }
         list
     }

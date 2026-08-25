@@ -122,6 +122,8 @@ fun DetailScreen(
     val streamRefreshButtonFocusRequester = remember { FocusRequester() }
     val firstStreamFocusRequester = remember { FocusRequester() }
     val firstTorrentFocusRequester = remember { FocusRequester() }
+    val firstSeasonTabFocusRequester = remember { FocusRequester() }
+    val firstEpisodeFocusRequester = remember { FocusRequester() }
 
     val tab0InteractionSource = remember { MutableInteractionSource() }
     val isTab0Focused by tab0InteractionSource.collectIsFocusedAsState()
@@ -328,7 +330,11 @@ fun DetailScreen(
                                             true
                                         }
                                         Key.DirectionDown -> {
-                                            if (selectedStreamTab == 1) {
+                                            if (isSeries && seasons.isNotEmpty()) {
+                                                firstSeasonTabFocusRequester.safeRequestFocus()
+                                            } else if (isSeries && currentSeasonEpisodes.isNotEmpty()) {
+                                                firstEpisodeFocusRequester.safeRequestFocus()
+                                            } else if (selectedStreamTab == 1) {
                                                 allTorrentsTabFocusRequester.safeRequestFocus()
                                             } else {
                                                 availableTabFocusRequester.safeRequestFocus()
@@ -376,7 +382,11 @@ fun DetailScreen(
                                             true
                                         }
                                         Key.DirectionDown -> {
-                                            if (selectedStreamTab == 1) {
+                                            if (isSeries && seasons.isNotEmpty()) {
+                                                firstSeasonTabFocusRequester.safeRequestFocus()
+                                            } else if (isSeries && currentSeasonEpisodes.isNotEmpty()) {
+                                                firstEpisodeFocusRequester.safeRequestFocus()
+                                            } else if (selectedStreamTab == 1) {
                                                 allTorrentsTabFocusRequester.safeRequestFocus()
                                             } else {
                                                 availableTabFocusRequester.safeRequestFocus()
@@ -554,8 +564,42 @@ fun DetailScreen(
                                 }
                             ) {
                                 seasons.forEachIndexed { index, seasonNum ->
+                                    val seasonTabInteraction = remember { MutableInteractionSource() }
+                                    val isSeasonTabFocused by seasonTabInteraction.collectIsFocusedAsState()
+
                                     Tab(
                                         selected = selectedSeasonIndex == index,
+                                        interactionSource = seasonTabInteraction,
+                                        modifier = Modifier
+                                            .then(if (index == 0) Modifier.focusRequester(firstSeasonTabFocusRequester) else Modifier)
+                                            .focusable(interactionSource = seasonTabInteraction)
+                                            .onPreviewKeyEvent { keyEvent ->
+                                                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                                when (keyEvent.key) {
+                                                    Key.DirectionUp -> {
+                                                        backButtonFocusRequester.safeRequestFocus()
+                                                        true
+                                                    }
+                                                    Key.DirectionDown -> {
+                                                        firstEpisodeFocusRequester.safeRequestFocus()
+                                                        true
+                                                    }
+                                                    Key.DirectionCenter,
+                                                    Key.Enter,
+                                                    Key.NumPadEnter,
+                                                    Key.Spacebar -> {
+                                                        if (selectedSeasonIndex != index) {
+                                                            selectedSeasonIndex = index
+                                                            selectedEpisode = null
+                                                            streams = emptyList()
+                                                            allTorrents = emptyList()
+                                                        }
+                                                        firstEpisodeFocusRequester.safeRequestFocus()
+                                                        true
+                                                    }
+                                                    else -> false
+                                                }
+                                            },
                                         onClick = {
                                             if (selectedSeasonIndex != index) {
                                                 selectedSeasonIndex = index
@@ -567,8 +611,8 @@ fun DetailScreen(
                                         text = {
                                             Text(
                                                 text = if (seasonNum == 0) "Season 0 (Specials)" else "Season $seasonNum",
-                                                fontWeight = if (selectedSeasonIndex == index) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (selectedSeasonIndex == index) PrimaryNeon else TextSecondary
+                                                fontWeight = if (isSeasonTabFocused || selectedSeasonIndex == index) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSeasonTabFocused) FocusRingOrange else if (selectedSeasonIndex == index) PrimaryNeon else TextSecondary
                                             )
                                         }
                                     )
@@ -583,11 +627,22 @@ fun DetailScreen(
                                 contentPadding = PaddingValues(horizontal = 20.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                items(currentSeasonEpisodes) { episode ->
+                                itemsIndexed(currentSeasonEpisodes) { index, episode ->
                                     val isSelected = selectedEpisode?.id == episode.id
                                     EpisodeHorizontalCardItem(
                                         episode = episode,
                                         isSelected = isSelected,
+                                        modifier = if (index == 0) Modifier.focusRequester(firstEpisodeFocusRequester) else Modifier,
+                                        onUp = {
+                                            firstSeasonTabFocusRequester.safeRequestFocus()
+                                        },
+                                        onDown = {
+                                            if (selectedStreamTab == 1) {
+                                                allTorrentsTabFocusRequester.safeRequestFocus()
+                                            } else {
+                                                availableTabFocusRequester.safeRequestFocus()
+                                            }
+                                        },
                                         onClick = {
                                             selectedEpisode = episode
                                             loadStreams(episode.id)
@@ -693,34 +748,6 @@ fun DetailScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-
-                            // Loading badge in header when resolving additional streams in background
-                            if (isResolvingMoreStreams && streams.isNotEmpty() && selectedStreamTab == 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(PrimaryNeon.copy(alpha = 0.15f))
-                                        .border(1.dp, PrimaryNeon.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                    ) {
-                                        CircularProgressIndicator(
-                                            color = PrimaryNeon,
-                                            modifier = Modifier.size(12.dp),
-                                            strokeWidth = 1.8.dp
-                                        )
-                                        Text(
-                                            text = "Finding more...",
-                                            color = PrimaryNeon,
-                                            fontSize = 10.5.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            }
                         }
                     }
 
@@ -762,7 +789,13 @@ fun DetailScreen(
                                             true
                                         }
                                         Key.DirectionUp -> {
-                                            backButtonFocusRequester.safeRequestFocus()
+                                            if (isSeries && currentSeasonEpisodes.isNotEmpty()) {
+                                                firstEpisodeFocusRequester.safeRequestFocus()
+                                            } else if (isSeries && seasons.isNotEmpty()) {
+                                                firstSeasonTabFocusRequester.safeRequestFocus()
+                                            } else {
+                                                backButtonFocusRequester.safeRequestFocus()
+                                            }
                                             true
                                         }
                                         Key.DirectionCenter,
@@ -783,24 +816,27 @@ fun DetailScreen(
                                     RoundedCornerShape(10.dp)
                                 )
                                 .clickable(interactionSource = tab0InteractionSource, indication = null) { selectedStreamTab = 0 }
-                                .padding(vertical = 9.dp),
+                                .padding(vertical = 9.dp, horizontal = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Movie,
                                     contentDescription = null,
                                     tint = if (isTab0Focused) FocusRingOrange else if (isTab0Selected) PrimaryNeon else TextSecondary,
-                                    modifier = Modifier.size(15.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
                                 Text(
                                     text = if (streams.isNotEmpty()) "Available (${streams.size})" else "Available",
                                     color = if (isTab0Focused) FocusRingOrange else if (isTab0Selected) Color.White else TextSecondary,
                                     fontSize = 12.sp,
-                                    fontWeight = if (isTab0Focused || isTab0Selected) FontWeight.Bold else FontWeight.Medium
+                                    fontWeight = if (isTab0Focused || isTab0Selected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -836,7 +872,13 @@ fun DetailScreen(
                                             true
                                         }
                                         Key.DirectionUp -> {
-                                            watchlistButtonFocusRequester.safeRequestFocus()
+                                            if (isSeries && currentSeasonEpisodes.isNotEmpty()) {
+                                                firstEpisodeFocusRequester.safeRequestFocus()
+                                            } else if (isSeries && seasons.isNotEmpty()) {
+                                                firstSeasonTabFocusRequester.safeRequestFocus()
+                                            } else {
+                                                watchlistButtonFocusRequester.safeRequestFocus()
+                                            }
                                             true
                                         }
                                         Key.DirectionCenter,
@@ -867,29 +909,32 @@ fun DetailScreen(
                                         queryId?.let { loadAllTorrents(it) }
                                     }
                                 }
-                                .padding(vertical = 9.dp),
+                                .padding(vertical = 9.dp, horizontal = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.AddLink,
                                     contentDescription = null,
                                     tint = if (isTab1Focused) FocusRingOrange else if (isTab1Selected) SecondaryCyan else TextSecondary,
-                                    modifier = Modifier.size(15.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
                                 Text(
-                                    text = if (allTorrents.isNotEmpty()) "All Torrents (${allTorrents.size})" else "All Torrents (⚡)",
+                                    text = if (allTorrents.isNotEmpty()) "All Torrents (${allTorrents.size})" else "All Torrents",
                                     color = if (isTab1Focused) FocusRingOrange else if (isTab1Selected) Color.White else TextSecondary,
                                     fontSize = 12.sp,
-                                    fontWeight = if (isTab1Focused || isTab1Selected) FontWeight.Bold else FontWeight.Medium
+                                    fontWeight = if (isTab1Focused || isTab1Selected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
 
-                        // Refresh / Reload Button (integrated in Tab Row with D-pad navigation)
+                        // Refresh / Reload Button (Icon-Only with D-pad navigation)
                         Box(
                             modifier = Modifier
                                 .focusRequester(streamRefreshButtonFocusRequester)
@@ -915,7 +960,13 @@ fun DetailScreen(
                                             true
                                         }
                                         Key.DirectionUp -> {
-                                            watchlistButtonFocusRequester.safeRequestFocus()
+                                            if (isSeries && currentSeasonEpisodes.isNotEmpty()) {
+                                                firstEpisodeFocusRequester.safeRequestFocus()
+                                            } else if (isSeries && seasons.isNotEmpty()) {
+                                                firstSeasonTabFocusRequester.safeRequestFocus()
+                                            } else {
+                                                watchlistButtonFocusRequester.safeRequestFocus()
+                                            }
                                             true
                                         }
                                         Key.DirectionCenter,
@@ -942,26 +993,15 @@ fun DetailScreen(
                                     loadStreams(queryId, forceRefresh = true)
                                     loadAllTorrents(queryId)
                                 }
-                                .padding(horizontal = 14.dp, vertical = 9.dp),
+                                .padding(horizontal = 11.dp, vertical = 9.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Refresh",
-                                    tint = if (isStreamRefreshFocused) FocusRingOrange else if (isResolvingMoreStreams || isStreamsLoading || isTorrentsLoading) PrimaryNeon else TextSecondary,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Text(
-                                    text = "Refresh",
-                                    color = if (isStreamRefreshFocused) FocusRingOrange else TextSecondary,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isStreamRefreshFocused) FontWeight.Bold else FontWeight.Medium
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Refresh Streams & Torrents",
+                                tint = if (isStreamRefreshFocused) FocusRingOrange else if (isResolvingMoreStreams || isStreamsLoading || isTorrentsLoading) PrimaryNeon else TextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     }
                 }
@@ -1008,7 +1048,7 @@ fun DetailScreen(
                                 ) {
                                     CircularProgressIndicator(color = PrimaryNeon, modifier = Modifier.size(30.dp), strokeWidth = 3.dp)
                                     Text(
-                                        text = "Fetching and recovering cloud streams...",
+                                        text = "Loading streams...",
                                         color = TextSecondary,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Medium
@@ -1108,39 +1148,6 @@ fun DetailScreen(
                                     onClick = { launchStream(restartFromBeginning = false) },
                                     onRestart = { launchStream(restartFromBeginning = true) }
                                 )
-                            }
-                        }
-
-                        // Background stream resolution indicator at the bottom of the list
-                        if (isResolvingMoreStreams && streams.isNotEmpty()) {
-                            item {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 20.dp, vertical = 10.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(SurfaceDark.copy(alpha = 0.7f))
-                                        .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(10.dp))
-                                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        CircularProgressIndicator(
-                                            color = PrimaryNeon,
-                                            modifier = Modifier.size(16.dp),
-                                            strokeWidth = 2.dp
-                                        )
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Text(
-                                            text = "Searching and resolving remaining stream qualities...",
-                                            color = TextSecondary,
-                                            fontSize = 12.sp
-                                        )
-                                    }
-                                }
                             }
                         }
                     }
@@ -1422,13 +1429,13 @@ fun DetailScreen(
                                 strokeWidth = 3.dp
                             )
                             Text(
-                                text = "☁️ Recovering Stream from Cloud...",
+                                text = "Preparing Stream...",
                                 color = TextPrimary,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "PikPak is preparing your high-speed playback link. Please wait a few seconds...",
+                                text = "Getting playback ready. Please wait...",
                                 color = TextMuted,
                                 fontSize = 12.5.sp,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -1445,21 +1452,45 @@ fun DetailScreen(
 private fun EpisodeHorizontalCardItem(
     episode: StremioVideoEpisode,
     isSelected: Boolean,
+    modifier: Modifier = Modifier,
+    onUp: (() -> Unit)? = null,
+    onDown: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
-    val bgColor = if (isFocused) FocusRingOrange.copy(alpha = 0.2f) else if (isSelected) PrimaryNeon.copy(alpha = 0.2f) else SurfaceCard
+    val bgColor = if (isFocused) FocusRingOrange.copy(alpha = 0.25f) else if (isSelected) PrimaryNeon.copy(alpha = 0.2f) else SurfaceCard
     val borderColor = if (isFocused) FocusRingOrange else if (isSelected) PrimaryNeon else Color(0x22FFFFFF)
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .width(145.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(bgColor)
             .border(if (isFocused) 2.5.dp else if (isSelected) 1.8.dp else 1.dp, borderColor, RoundedCornerShape(10.dp))
             .focusable(interactionSource = interactionSource)
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (keyEvent.key) {
+                    Key.DirectionUp -> {
+                        onUp?.invoke()
+                        true
+                    }
+                    Key.DirectionDown -> {
+                        onDown?.invoke()
+                        true
+                    }
+                    Key.DirectionCenter,
+                    Key.Enter,
+                    Key.NumPadEnter,
+                    Key.Spacebar -> {
+                        onClick()
+                        true
+                    }
+                    else -> false
+                }
+            }
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(6.dp)
     ) {

@@ -115,9 +115,24 @@ class SourcesRepository(
         if (raw.isNullOrBlank()) emptyList()
         else {
             try {
-                json.decodeFromString<List<com.mystream.app.data.model.PlaybackProgressRecord>>(raw)
+                val allRecords = json.decodeFromString<List<com.mystream.app.data.model.PlaybackProgressRecord>>(raw)
                     .filter { it.positionMs > 10_000L && (it.durationMs == 0L || it.positionMs < (it.durationMs * 0.95)) }
                     .sortedByDescending { it.lastUpdatedMs }
+
+                // Group by Series: keep only the single latest played episode per series
+                val seenSeries = mutableSetOf<String>()
+                val deduplicated = mutableListOf<com.mystream.app.data.model.PlaybackProgressRecord>()
+                for (rec in allRecords) {
+                    if (rec.type.equals("series", ignoreCase = true)) {
+                        val baseSeriesId = rec.imdbId.substringBefore(":").ifBlank { rec.mediaId.substringBefore(":") }
+                        if (seenSeries.add(baseSeriesId)) {
+                            deduplicated.add(rec)
+                        }
+                    } else {
+                        deduplicated.add(rec)
+                    }
+                }
+                deduplicated
             } catch (e: Exception) {
                 emptyList()
             }
@@ -208,7 +223,18 @@ class SourcesRepository(
                 durationMs = durationMs,
                 lastUpdatedMs = System.currentTimeMillis()
             )
-            val updated = (listOf(record) + current.filter { it.mediaId != mediaId }).take(50)
+
+            // For series, replace any prior episodes of the same series
+            val baseSeriesId = imdbId.substringBefore(":").ifBlank { mediaId.substringBefore(":") }
+            val filtered = current.filter {
+                if (type.equals("series", ignoreCase = true)) {
+                    val otherBaseId = it.imdbId.substringBefore(":").ifBlank { it.mediaId.substringBefore(":") }
+                    otherBaseId != baseSeriesId && it.mediaId != mediaId
+                } else {
+                    it.mediaId != mediaId
+                }
+            }
+            val updated = (listOf(record) + filtered).take(50)
             prefs[PLAYBACK_PROGRESS_KEY] = json.encodeToString(updated)
         }
     }

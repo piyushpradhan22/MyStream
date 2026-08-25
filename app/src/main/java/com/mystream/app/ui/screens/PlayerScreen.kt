@@ -660,31 +660,6 @@ fun PlayerScreen(
                     }
                 )
             }
-            .pointerInput(Unit) {
-                detectVerticalDragGestures { change, dragAmount ->
-                    if (!isControlsLocked) {
-                        val isLeft = change.position.x < size.width / 2
-                        if (isLeft) {
-                            // Adjust Brightness
-                            val activity = context as? Activity
-                            activity?.let {
-                                val lp = it.window.attributes
-                                val currentBrightness = if (lp.screenBrightness < 0) 0.5f else lp.screenBrightness
-                                val delta = -dragAmount / 500f
-                                val newBrightness = (currentBrightness + delta).coerceIn(0.01f, 1.0f)
-                                lp.screenBrightness = newBrightness
-                                it.window.attributes = lp
-                                gestureFeedbackText = "Brightness: ${(newBrightness * 100).toInt()}%"
-                                gestureFeedbackIcon = Icons.Default.BrightnessMedium
-                            }
-                        } else {
-                            // Adjust Media Volume
-                            val delta = if (dragAmount < 0) 1 else -1
-                            changeVolumeByStep(delta)
-                        }
-                    }
-                }
-            }
     ) {
         // ExoPlayer View
         AndroidView(

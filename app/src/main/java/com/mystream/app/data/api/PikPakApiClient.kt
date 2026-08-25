@@ -218,7 +218,8 @@ class PikPakApiClient(
 
     suspend fun addMagnetAndGetResolvedFile(
         magnetUrl: String,
-        token: String = cachedAccessToken ?: ""
+        token: String = cachedAccessToken ?: "",
+        targetFileName: String? = null
     ): Result<PikPakResolvedFile> = withContext(Dispatchers.IO) {
         if (token.isBlank()) {
             return@withContext Result.failure(IllegalStateException("Not authenticated with PikPak"))
@@ -315,7 +316,7 @@ class PikPakApiClient(
 
                 val finalFileId = fileId
                 if (!finalFileId.isNullOrBlank()) {
-                    val streamResult = getDirectStreamUrlForFile(finalFileId, token)
+                    val streamResult = getDirectStreamUrlForFile(finalFileId, token, targetFileName)
                     return@withContext streamResult.map { streamUrl ->
                         PikPakResolvedFile(
                             fileId = finalFileId,
@@ -341,7 +342,8 @@ class PikPakApiClient(
 
     suspend fun getDirectStreamUrlForFile(
         fileId: String,
-        token: String = cachedAccessToken ?: ""
+        token: String = cachedAccessToken ?: "",
+        targetFileName: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         if (fileId.isBlank()) return@withContext Result.failure(IllegalArgumentException("File ID is blank"))
 
@@ -363,11 +365,11 @@ class PikPakApiClient(
                 val rootJson = json.parseToJsonElement(body).jsonObject
                 val kind = rootJson["kind"]?.jsonPrimitive?.content
 
-                // If this is a folder (multi-file torrent), list children and find the primary video file
+                // If this is a folder (multi-file torrent), list children and find the primary or episode video file
                 if (kind == "drive#folder") {
                     try {
                         val listReq = Request.Builder()
-                            .url("https://$PIKPAK_API_HOST/drive/v1/files?parent_id=$fileId&limit=50")
+                            .url("https://$PIKPAK_API_HOST/drive/v1/files?parent_id=$fileId&limit=100")
                             .get()
                             .header("Authorization", "Bearer $token")
                             .header("User-Agent", "ANDROID-$PACKAGE_NAME/$CLIENT_VERSION")
@@ -382,17 +384,37 @@ class PikPakApiClient(
                                 val videoFiles = files?.mapNotNull { it.jsonObject }?.filter { f ->
                                     val name = f["name"]?.jsonPrimitive?.content.orEmpty().lowercase()
                                     val fKind = f["kind"]?.jsonPrimitive?.content.orEmpty()
-                                    fKind == "drive#file" && (name.endsWith(".mkv") || name.endsWith(".mp4") || name.endsWith(".avi") || name.endsWith(".mov"))
+                                    fKind == "drive#file" && (name.endsWith(".mkv") || name.endsWith(".mp4") || name.endsWith(".avi") || name.endsWith(".mov") || name.endsWith(".ts"))
                                 } ?: emptyList()
-                                val target = videoFiles.maxByOrNull {
-                                    it["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+
+                                val target = if (!targetFileName.isNullOrBlank() && videoFiles.isNotEmpty()) {
+                                    val cleanTarget = targetFileName.lowercase().substringBefore("\n").trim()
+                                    videoFiles.firstOrNull { f ->
+                                        val fn = f["name"]?.jsonPrimitive?.content.orEmpty().lowercase()
+                                        fn == cleanTarget || fn.contains(cleanTarget) || cleanTarget.contains(fn)
+                                    } ?: run {
+                                        val epPattern = Regex("""(?i)(?:s\d{1,2})?e(\d{1,3})|(\d{1,2})x(\d{1,3})|episode\s*(\d{1,3})""").find(cleanTarget)
+                                        if (epPattern != null) {
+                                            val epMatchStr = epPattern.value.lowercase()
+                                            videoFiles.firstOrNull { f ->
+                                                val fn = f["name"]?.jsonPrimitive?.content.orEmpty().lowercase()
+                                                fn.contains(epMatchStr)
+                                            }
+                                        } else null
+                                    } ?: videoFiles.maxByOrNull {
+                                        it["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+                                    }
+                                } else {
+                                    videoFiles.maxByOrNull {
+                                        it["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+                                    }
                                 } ?: files?.mapNotNull { it.jsonObject }?.firstOrNull {
                                     it["kind"]?.jsonPrimitive?.content == "drive#folder"
                                 } ?: files?.firstOrNull()?.jsonObject
 
                                 val targetId = target?.get("id")?.jsonPrimitive?.content
                                 if (!targetId.isNullOrBlank() && targetId != fileId) {
-                                    return@withContext getDirectStreamUrlForFile(targetId, token)
+                                    return@withContext getDirectStreamUrlForFile(targetId, token, targetFileName)
                                 }
                             }
                         }

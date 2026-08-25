@@ -290,19 +290,35 @@ class PikPakStreamResolver(
             return@channelFlow
         }
 
-        val currentInfoHashes = currentTorrents.mapNotNull { it.infoHash }.toSet()
+        val currentInfoHashes = currentTorrents.mapNotNull { it.infoHash }.filter { it.isNotBlank() }.distinct()
         val accumulatedStreams = mutableListOf<StremioStreamSource>()
         val mutex = Mutex()
         val resolvedQualities = mutableSetOf<String>()
 
-        // 2. Check and reuse cached records in pikpak_v2
+        // Check if any candidate torrent infoHash already exists in DB pikpak_v2 (e.g. from previous episode or quality)
+        val infoHashRecordsDeferred = async(Dispatchers.IO) {
+            if (postgresUrl.isNotBlank() && currentInfoHashes.isNotEmpty()) {
+                PostgresAccountFetcher.getPikpakV2RecordsForInfoHashes(postgresUrl, currentInfoHashes)
+            } else {
+                emptyList()
+            }
+        }
+        val infoHashRecords = infoHashRecordsDeferred.await()
+        val accountByInfoHash = infoHashRecords.filter { it.infoHash.isNotBlank() && it.username.isNotBlank() }
+            .associateBy { it.infoHash.lowercase() }
+
+        if (accountByInfoHash.isNotEmpty()) {
+            Log.i(TAG, "♻️ Found ${accountByInfoHash.size} existing torrent infoHashes in DB cache for account reuse!")
+        }
+
+        // 2. Check and reuse cached records in pikpak_v2 for this exact ID
         if (!forceRefresh && postgresUrl.isNotBlank() && dataV2.isNotEmpty()) {
             val validCachedRecords = dataV2.filter { rec ->
                 rec.infoHash.isBlank() || currentInfoHashes.contains(rec.infoHash)
             }
 
             if (validCachedRecords.isNotEmpty()) {
-                Log.i(TAG, "⚡ Checking ${validCachedRecords.size} cached DB records...")
+                Log.i(TAG, "⚡ Checking ${validCachedRecords.size} cached DB records for exact ID...")
                 val cachedJobs = validCachedRecords.map { record ->
                     launch(Dispatchers.IO) {
                         var token = record.accessToken
@@ -400,12 +416,22 @@ class PikPakStreamResolver(
                     val qualityName = "📽️ $quality"
                     val titleClean = torr.title?.lines()?.firstOrNull() ?: torr.name ?: "Stream"
 
-                    for (acc in assignedAccounts) {
+                    // If this infoHash exists in DB on an account, reuse that SAME account first!
+                    val knownRecord = accountByInfoHash[infoHash.lowercase()]
+                    val candidateAccounts = if (knownRecord != null && knownRecord.username.isNotBlank()) {
+                        Log.i(TAG, "[$quality] ♻️ Torrent infoHash [$infoHash] already in account ${knownRecord.username}, reusing it directly!")
+                        listOf(PikPakAccount(username = knownRecord.username, password = sharedPass)) + assignedAccounts.filter { it.username != knownRecord.username }
+                    } else {
+                        assignedAccounts
+                    }
+
+                    for (acc in candidateAccounts) {
                         try {
-                            Log.d(TAG, "[$quality] Trying candidate [$infoHash] (Hindi=${torr.hasHindiAudio}) with account: ${acc.username}")
+                            val isReusedAccount = knownRecord != null && acc.username == knownRecord.username
+                            Log.d(TAG, "[$quality] Trying candidate [$infoHash] (Hindi=${torr.hasHindiAudio}, ReusedAccount=$isReusedAccount) with account: ${acc.username}")
                             val authRes = pikpakClient.login(acc.username, acc.password)
                             if (authRes.isFailure) {
-                                if (postgresUrl.isNotBlank()) {
+                                if (postgresUrl.isNotBlank() && !isReusedAccount) {
                                     launch(Dispatchers.IO) { PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username) }
                                 }
                                 continue // try next account if login failed
@@ -413,14 +439,18 @@ class PikPakStreamResolver(
 
                             val authData = authRes.getOrNull()
                             val token = authData?.accessToken ?: pikpakClient.cachedAccessToken.orEmpty()
-                            val fileRes = pikpakClient.addMagnetAndGetResolvedFile(magnetUrl = magnet, token = token)
+                            val fileRes = pikpakClient.addMagnetAndGetResolvedFile(
+                                magnetUrl = magnet,
+                                token = token,
+                                targetFileName = torr.behaviorHints?.bingeGroup ?: torr.title
+                            )
 
                             if (fileRes.isFailure) {
                                 val ex = fileRes.exceptionOrNull()
                                 val msg = ex?.message.orEmpty()
                                 if (msg.contains("limit", ignoreCase = true) || msg.contains("task_daily", ignoreCase = true) || msg.contains("403", ignoreCase = true) || msg.contains("space", ignoreCase = true)) {
                                     Log.w(TAG, "[$quality] Account ${acc.username} quota limit exceeded: $msg")
-                                    if (postgresUrl.isNotBlank()) {
+                                    if (postgresUrl.isNotBlank() && !isReusedAccount) {
                                         launch(Dispatchers.IO) { PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username) }
                                     }
                                     continue // Account is exhausted, try next account!
