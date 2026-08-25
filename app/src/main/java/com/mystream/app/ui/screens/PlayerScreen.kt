@@ -1,3 +1,8 @@
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.media3.common.util.UnstableApi::class
+)
+
 package com.mystream.app.ui.screens
 
 import android.app.Activity
@@ -5,7 +10,6 @@ import com.mystream.app.ui.utils.safeRequestFocus
 import android.content.Context
 import android.media.AudioManager
 import android.view.WindowManager
-import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -104,7 +108,18 @@ import com.mystream.app.ui.components.AudioTrackSelectorDialog
 import com.mystream.app.ui.components.SpeedSelectorDialog
 import com.mystream.app.ui.components.SubtitleTrackSelectorDialog
 import com.mystream.app.ui.theme.AccentAmber
+import com.mystream.app.ui.theme.EmeraldNeon
 import com.mystream.app.ui.theme.FocusRingOrange
+import com.mystream.app.ui.theme.FocusRingOrangeGlow
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material3.ExperimentalMaterial3Api
+import com.mystream.app.ui.theme.GlassBorder
+import com.mystream.app.ui.theme.GlassBorderStrong
+import com.mystream.app.ui.theme.GlassSurface
 import com.mystream.app.ui.theme.PrimaryNeon
 import com.mystream.app.ui.theme.SecondaryCyan
 import com.mystream.app.ui.theme.TextMuted
@@ -112,7 +127,7 @@ import com.mystream.app.ui.theme.TextPrimary
 import com.mystream.app.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
-@OptIn(UnstableApi::class)
+@OptIn(UnstableApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(
     playerManager: MyStreamPlayerManager,
@@ -821,7 +836,7 @@ fun PlayerScreen(
             }
         }
 
-        // Controls HUD Overlay
+        // Controls HUD Overlay (State-of-the-Art Floating Glass Architecture)
         AnimatedVisibility(
             visible = showControls && !isControlsLocked,
             enter = fadeIn(),
@@ -832,47 +847,59 @@ fun PlayerScreen(
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            0.0f to Color(0xB3000000),
-                            0.3f to Color.Transparent,
-                            0.7f to Color.Transparent,
-                            1.0f to Color(0xE6000000)
+                            0.0f to Color(0xCC07090E),
+                            0.25f to Color.Transparent,
+                            0.65f to Color.Transparent,
+                            1.0f to Color(0xF207090E)
                         )
                     )
             ) {
-                // Top Header Bar (Clean - only Back button & Title)
+                // Top Header Bar (Minimal Floating Glass Capsule)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.TopCenter)
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                        .padding(horizontal = 28.dp, vertical = 20.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        IconButton(onClick = onBack) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x4D000000))
+                                .border(1.dp, Color(0x33FFFFFF), CircleShape)
+                                .clickable(onClick = onBack),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back",
-                                tint = Color.White
+                                tint = Color.White,
+                                modifier = Modifier.size(19.dp)
                             )
                         }
-                        Column {
+
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
                                 text = item.title,
                                 color = TextPrimary,
                                 fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             if (!item.subtitle.isNullOrBlank()) {
                                 Text(
                                     text = item.subtitle,
-                                    color = TextSecondary,
+                                    color = SecondaryCyan,
                                     fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
                                     maxLines = 1
                                 )
                             }
@@ -880,20 +907,29 @@ fun PlayerScreen(
                     }
 
                     if (onEnterPiP != null) {
-                        IconButton(onClick = onEnterPiP) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x4D000000))
+                                .border(1.dp, Color(0x33FFFFFF), CircleShape)
+                                .clickable(onClick = onEnterPiP),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.PictureInPicture,
                                 contentDescription = "Picture-in-Picture",
-                                tint = SecondaryCyan
+                                tint = SecondaryCyan,
+                                modifier = Modifier.size(19.dp)
                             )
                         }
                     }
                 }
 
-                // Center Play/Pause & Seek Controls
+                // Center Play/Pause & Fast-Seek Cluster with Animations
                 Row(
                     modifier = Modifier.align(Alignment.Center),
-                    horizontalArrangement = Arrangement.spacedBy(28.dp),
+                    horizontalArrangement = Arrangement.spacedBy(32.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
@@ -904,40 +940,68 @@ fun PlayerScreen(
                             .focusRequester(rewindFocusRequester)
                             .onPreviewKeyEvent(::handleRewindNav)
                             .clip(CircleShape)
-                            .then(if (rewindFocused) Modifier.border(2.5.dp, FocusRingOrange, CircleShape) else Modifier)
-                            .background(Color(0x55000000))
+                            .background(if (rewindFocused) FocusRingOrange.copy(alpha = 0.35f) else Color(0x4D000000))
+                            .border(
+                                if (rewindFocused) 2.dp else 1.dp,
+                                if (rewindFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                CircleShape
+                            )
                     ) {
                         Icon(
                             imageVector = Icons.Default.Replay10,
                             contentDescription = "Rewind 10s",
-                            tint = Color.White,
-                            modifier = Modifier.size(30.dp)
+                            tint = if (rewindFocused) FocusRingOrange else Color.White,
+                            modifier = Modifier.size(26.dp)
                         )
+                    }
+
+                    // Main Hero Play/Pause Button (Distinct Visuals & Animation for Play vs Pause)
+                    val playPauseBg = when {
+                        playPauseFocused -> FocusRingOrange
+                        isPlaying -> Color(0x5500D2D3)
+                        else -> PrimaryNeon
+                    }
+                    val playPauseBorderColor = when {
+                        playPauseFocused -> Color.White
+                        isPlaying -> SecondaryCyan
+                        else -> Color(0x88FFFFFF)
                     }
 
                     IconButton(
                         onClick = { playerManager.togglePlayPause() },
                         interactionSource = playPauseInteraction,
                         modifier = Modifier
-                            .size(68.dp)
+                            .size(72.dp)
                             .focusRequester(playPauseFocusRequester)
                             .onPreviewKeyEvent(::handlePlayPauseNav)
                             .clip(CircleShape)
-                            .then(if (playPauseFocused) Modifier.border(3.5.dp, FocusRingOrange, CircleShape) else Modifier)
-                            .background(PrimaryNeon)
+                            .background(playPauseBg)
+                            .border(
+                                if (playPauseFocused) 3.dp else 1.5.dp,
+                                playPauseBorderColor,
+                                CircleShape
+                            )
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = "Play/Pause",
-                                tint = Color.White,
-                                modifier = Modifier.size(40.dp)
-                            )
+                            AnimatedContent(
+                                targetState = isPlaying,
+                                transitionSpec = {
+                                    (scaleIn() + fadeIn()).togetherWith(scaleOut() + fadeOut())
+                                },
+                                label = "PlayPauseAnimation"
+                            ) { targetPlaying ->
+                                Icon(
+                                    imageVector = if (targetPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = "Play/Pause",
+                                    tint = if (playPauseFocused) Color.Black else Color.White,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
                             if (isBuffering) {
                                 CircularProgressIndicator(
-                                    color = Color.White,
-                                    strokeWidth = 2.5.dp,
-                                    modifier = Modifier.size(54.dp)
+                                    color = if (playPauseFocused) Color.Black else Color.White,
+                                    strokeWidth = 3.dp,
+                                    modifier = Modifier.size(56.dp)
                                 )
                             }
                         }
@@ -951,26 +1015,30 @@ fun PlayerScreen(
                             .focusRequester(forwardFocusRequester)
                             .onPreviewKeyEvent(::handleForwardNav)
                             .clip(CircleShape)
-                            .then(if (forwardFocused) Modifier.border(2.5.dp, FocusRingOrange, CircleShape) else Modifier)
-                            .background(Color(0x55000000))
+                            .background(if (forwardFocused) FocusRingOrange.copy(alpha = 0.35f) else Color(0x4D000000))
+                            .border(
+                                if (forwardFocused) 2.dp else 1.dp,
+                                if (forwardFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                CircleShape
+                            )
                     ) {
                         Icon(
                             imageVector = Icons.Default.Forward10,
                             contentDescription = "Forward 10s",
-                            tint = Color.White,
-                            modifier = Modifier.size(30.dp)
+                            tint = if (forwardFocused) FocusRingOrange else Color.White,
+                            modifier = Modifier.size(26.dp)
                         )
                     }
                 }
 
-                // Bottom HUD Bar (Seekbar, timestamps, and combined bottom controls)
+                // Bottom Floating HUD (Completely Borderless & Transparent)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
-                        .padding(horizontal = 24.dp, vertical = 18.dp)
+                        .padding(horizontal = 32.dp, vertical = 24.dp)
                 ) {
-                    // Seekbar with timestamps
+                    // Timeline Seekbar Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -980,12 +1048,13 @@ fun PlayerScreen(
                         Text(
                             text = formatDuration(currentMs),
                             color = TextPrimary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
                         )
 
+                        val remainingMs = (duration - currentMs).coerceAtLeast(0L)
                         Text(
-                            text = formatDuration(duration),
+                            text = "-${formatDuration(remainingMs)}",
                             color = TextSecondary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
@@ -1006,11 +1075,25 @@ fun PlayerScreen(
                             isUserSeeking = false
                         },
                         valueRange = 0f..maxSliderValue,
-                        colors = SliderDefaults.colors(
-                            thumbColor = FocusRingOrange,
-                            activeTrackColor = FocusRingOrange,
-                            inactiveTrackColor = Color(0x40FFFFFF)
-                        ),
+                        thumb = {
+                            Box(
+                                modifier = Modifier
+                                    .size(if (seekbarFocused || isUserSeeking) 16.dp else 12.dp)
+                                    .clip(CircleShape)
+                                    .background(FocusRingOrange)
+                                    .border(2.dp, Color.White, CircleShape)
+                            )
+                        },
+                        track = { sliderState ->
+                            SliderDefaults.Track(
+                                sliderState = sliderState,
+                                modifier = Modifier.height(4.dp),
+                                colors = SliderDefaults.colors(
+                                    activeTrackColor = FocusRingOrange,
+                                    inactiveTrackColor = Color(0x33FFFFFF)
+                                )
+                            )
+                        },
                         interactionSource = seekbarInteraction,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1025,31 +1108,29 @@ fun PlayerScreen(
                             )
                     )
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    // Bottom Action Row (Audio, Subtitles, Aspect Ratio, Speed, Screen, Lock)
+                    // Quick Action Transparent Pills Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 1. Audio Track Selector Button
+                        // 1. Audio Track Selector Pill
                         Row(
                             modifier = Modifier
                                 .focusRequester(audioFocusRequester)
                                 .focusable(interactionSource = audioInteraction)
                                 .onPreviewKeyEvent(::handleAudioNav)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (audioFocused) FocusRingOrange.copy(alpha = 0.25f) else Color(0x33FFFFFF))
-                                .then(
-                                    if (audioFocused) Modifier.border(
-                                        width = 2.dp,
-                                        color = FocusRingOrange,
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) else Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (audioFocused) FocusRingOrange.copy(alpha = 0.35f) else Color(0x4D000000))
+                                .border(
+                                    if (audioFocused) 2.dp else 1.dp,
+                                    if (audioFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                    RoundedCornerShape(20.dp)
                                 )
                                 .clickable(interactionSource = audioInteraction, indication = null) { showAudioDialog = true }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
@@ -1057,33 +1138,31 @@ fun PlayerScreen(
                                 imageVector = Icons.Default.Audiotrack,
                                 contentDescription = null,
                                 tint = if (audioFocused) FocusRingOrange else PrimaryNeon,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = "Audio",
                                 color = if (audioFocused) FocusRingOrange else TextPrimary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
 
-                        // 2. Subtitle Selector Button
+                        // 2. Subtitle Selector Pill
                         Row(
                             modifier = Modifier
                                 .focusRequester(subtitleFocusRequester)
                                 .focusable(interactionSource = subtitleInteraction)
                                 .onPreviewKeyEvent(::handleSubtitleNav)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (subtitleFocused) FocusRingOrange.copy(alpha = 0.25f) else if (isSubtitleEnabled) SecondaryCyan.copy(alpha = 0.25f) else Color(0x33FFFFFF))
-                                .then(
-                                    if (subtitleFocused) Modifier.border(
-                                        width = 2.dp,
-                                        color = FocusRingOrange,
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) else Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (subtitleFocused) FocusRingOrange.copy(alpha = 0.35f) else if (isSubtitleEnabled) SecondaryCyan.copy(alpha = 0.25f) else Color(0x4D000000))
+                                .border(
+                                    if (subtitleFocused) 2.dp else 1.dp,
+                                    if (subtitleFocused) FocusRingOrange else if (isSubtitleEnabled) SecondaryCyan else Color(0x33FFFFFF),
+                                    RoundedCornerShape(20.dp)
                                 )
                                 .clickable(interactionSource = subtitleInteraction, indication = null) { showSubtitleDialog = true }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
@@ -1091,33 +1170,31 @@ fun PlayerScreen(
                                 imageVector = Icons.Default.Subtitles,
                                 contentDescription = null,
                                 tint = if (subtitleFocused) FocusRingOrange else if (isSubtitleEnabled) SecondaryCyan else TextSecondary,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = if (isSubtitleEnabled) "CC On" else "Subtitles",
                                 color = if (subtitleFocused) FocusRingOrange else TextPrimary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
 
-                        // 3. Aspect Ratio / Fit Screen Button
+                        // 3. Aspect Ratio Pill
                         Row(
                             modifier = Modifier
                                 .focusRequester(aspectFocusRequester)
                                 .focusable(interactionSource = aspectInteraction)
                                 .onPreviewKeyEvent(::handleAspectNav)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (aspectFocused) FocusRingOrange.copy(alpha = 0.25f) else Color(0x33FFAA00))
-                                .then(
-                                    if (aspectFocused) Modifier.border(
-                                        width = 2.dp,
-                                        color = FocusRingOrange,
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) else Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (aspectFocused) FocusRingOrange.copy(alpha = 0.35f) else Color(0x4D000000))
+                                .border(
+                                    if (aspectFocused) 2.dp else 1.dp,
+                                    if (aspectFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                    RoundedCornerShape(20.dp)
                                 )
                                 .clickable(interactionSource = aspectInteraction, indication = null) { showAspectDialog = true }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
@@ -1125,64 +1202,60 @@ fun PlayerScreen(
                                 imageVector = Icons.Default.AspectRatio,
                                 contentDescription = null,
                                 tint = if (aspectFocused) FocusRingOrange else AccentAmber,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = aspectRatio.label.substringBefore(" ("),
-                                color = if (aspectFocused) FocusRingOrange else AccentAmber,
-                                fontSize = 12.sp,
+                                color = if (aspectFocused) FocusRingOrange else TextPrimary,
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
 
-                        // 4. Playback Speed Button
+                        // 4. Playback Speed Pill
                         Row(
                             modifier = Modifier
                                 .focusRequester(speedFocusRequester)
                                 .focusable(interactionSource = speedInteraction)
                                 .onPreviewKeyEvent(::handleSpeedNav)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (speedFocused) FocusRingOrange.copy(alpha = 0.25f) else Color(0x336C5CE7))
-                                .then(
-                                    if (speedFocused) Modifier.border(
-                                        width = 2.dp,
-                                        color = FocusRingOrange,
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) else Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (speedFocused) FocusRingOrange.copy(alpha = 0.35f) else Color(0x4D000000))
+                                .border(
+                                    if (speedFocused) 2.dp else 1.dp,
+                                    if (speedFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                    RoundedCornerShape(20.dp)
                                 )
                                 .clickable(interactionSource = speedInteraction, indication = null) { showSpeedDialog = true }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Speed,
                                 contentDescription = null,
-                                tint = if (speedFocused) FocusRingOrange else PrimaryNeon,
-                                modifier = Modifier.size(16.dp)
+                                tint = if (speedFocused) FocusRingOrange else EmeraldNeon,
+                                modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = "${playbackSpeed}x",
-                                color = if (speedFocused) FocusRingOrange else PrimaryNeon,
-                                fontSize = 12.sp,
+                                color = if (speedFocused) FocusRingOrange else TextPrimary,
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
 
-                        // 5. Fullscreen / Orientation Toggle Button
+                        // 5. Fullscreen / Orientation Toggle Pill
                         Row(
                             modifier = Modifier
                                 .focusRequester(fullscreenFocusRequester)
                                 .focusable(interactionSource = fullscreenInteraction)
                                 .onPreviewKeyEvent(::handleFullscreenNav)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (fullscreenFocused) FocusRingOrange.copy(alpha = 0.25f) else Color(0x33FFFFFF))
-                                .then(
-                                    if (fullscreenFocused) Modifier.border(
-                                        width = 2.dp,
-                                        color = FocusRingOrange,
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) else Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (fullscreenFocused) FocusRingOrange.copy(alpha = 0.35f) else Color(0x4D000000))
+                                .border(
+                                    if (fullscreenFocused) 2.dp else 1.dp,
+                                    if (fullscreenFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                    RoundedCornerShape(20.dp)
                                 )
                                 .clickable(interactionSource = fullscreenInteraction, indication = null) {
                                     isLandscape = !isLandscape
@@ -1193,7 +1266,7 @@ fun PlayerScreen(
                                         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                                     }
                                 }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
@@ -1201,36 +1274,34 @@ fun PlayerScreen(
                                 imageVector = if (isLandscape) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
                                 contentDescription = null,
                                 tint = if (fullscreenFocused) FocusRingOrange else Color.White,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = if (isLandscape) "Landscape" else "Portrait",
                                 color = if (fullscreenFocused) FocusRingOrange else TextPrimary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
 
-                        // 6. Lock Controls Button
+                        // 6. Lock Controls Pill
                         Row(
                             modifier = Modifier
                                 .focusRequester(lockFocusRequester)
                                 .focusable(interactionSource = lockInteraction)
                                 .onPreviewKeyEvent(::handleLockNav)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (lockFocused) FocusRingOrange.copy(alpha = 0.25f) else Color(0x33FFFFFF))
-                                .then(
-                                    if (lockFocused) Modifier.border(
-                                        width = 2.dp,
-                                        color = FocusRingOrange,
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) else Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (lockFocused) FocusRingOrange.copy(alpha = 0.35f) else Color(0x4D000000))
+                                .border(
+                                    if (lockFocused) 2.dp else 1.dp,
+                                    if (lockFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                    RoundedCornerShape(20.dp)
                                 )
                                 .clickable(interactionSource = lockInteraction, indication = null) {
                                     isControlsLocked = true
                                     showControls = false
                                 }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
@@ -1238,13 +1309,38 @@ fun PlayerScreen(
                                 imageVector = Icons.Default.LockOpen,
                                 contentDescription = null,
                                 tint = if (lockFocused) FocusRingOrange else TextSecondary,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = "Lock",
                                 color = if (lockFocused) FocusRingOrange else TextPrimary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // 7. Live Download Speed Info Pill (Always shown after Lock)
+                        val currentSpeedText = if (downloadSpeed.isNotBlank() && downloadSpeed != "0 KB/s") downloadSpeed else "Online"
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color(0x33000000))
+                                .border(1.dp, EmeraldNeon.copy(alpha = 0.35f), RoundedCornerShape(20.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Bolt,
+                                contentDescription = null,
+                                tint = EmeraldNeon,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = currentSpeedText,
+                                color = EmeraldNeon,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }

@@ -110,9 +110,22 @@ class MyStreamPlayerManager(
         }
         .build()
 
+    private val liveBytesCounter = java.util.concurrent.atomic.AtomicLong(0L)
+
+    private val speedTransferListener = object : androidx.media3.datasource.TransferListener {
+        override fun onTransferInitializing(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+        override fun onTransferStart(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+        override fun onBytesTransferred(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
+            if (isNetwork) {
+                liveBytesCounter.addAndGet(bytesTransferred.toLong())
+            }
+        }
+        override fun onTransferEnd(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+    }
+
     private val httpDataSourceFactory = OkHttpDataSource.Factory(playerOkHttpClient)
         .setUserAgent("ANDROID-com.pikcloud.pikpak/1.47.1")
-        .setTransferListener(bandwidthMeter)
+        .setTransferListener(speedTransferListener)
 
     private val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
 
@@ -163,7 +176,7 @@ class MyStreamPlayerManager(
     private val _bufferedPosition = MutableStateFlow(0L)
     val bufferedPosition: StateFlow<Long> = _bufferedPosition.asStateFlow()
 
-    private val _downloadSpeed = MutableStateFlow("0.0 MB/s")
+    private val _downloadSpeed = MutableStateFlow("0 KB/s")
     val downloadSpeed: StateFlow<String> = _downloadSpeed.asStateFlow()
 
     private val _bufferPercentage = MutableStateFlow(0)
@@ -276,6 +289,7 @@ class MyStreamPlayerManager(
         tickerJob?.cancel()
         tickerJob = scope.launch {
             var lastSaveTick = 0L
+            var lastSpeedCalcTime = System.currentTimeMillis()
             while (isActive) {
                 if (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING) {
                     _currentPosition.value = player.currentPosition.coerceAtLeast(0L)
@@ -283,24 +297,29 @@ class MyStreamPlayerManager(
                     _bufferedPosition.value = player.bufferedPosition.coerceAtLeast(0L)
                     _bufferPercentage.value = player.bufferedPercentage
 
-                    val bitrateBps = bandwidthMeter.bitrateEstimate
-                    val bytesPerSec = bitrateBps / 8.0
-                    val speedStr = if (bytesPerSec > 1024 * 1024) {
-                        "%.1f MB/s".format(bytesPerSec / (1024 * 1024))
-                    } else if (bytesPerSec > 1024) {
-                        "%.0f KB/s".format(bytesPerSec / 1024)
-                    } else {
-                        "%.0f KB/s".format((bytesPerSec / 1024).coerceAtLeast(1.0))
+                    val now = System.currentTimeMillis()
+                    val elapsedMs = (now - lastSpeedCalcTime).coerceAtLeast(1L)
+                    val bytesReadInWindow = liveBytesCounter.getAndSet(0L)
+                    val liveBytesPerSec = (bytesReadInWindow * 1000.0) / elapsedMs
+                    lastSpeedCalcTime = now
+
+                    val fallbackBytesPerSec = bandwidthMeter.bitrateEstimate / 8.0
+                    val currentBps = if (liveBytesPerSec > 0) liveBytesPerSec else (if (player.isPlaying) fallbackBytesPerSec else 0.0)
+
+                    val speedStr = when {
+                        currentBps > 1024 * 1024 -> "%.1f MB/s".format(currentBps / (1024 * 1024))
+                        currentBps > 1024 -> "%.0f KB/s".format(currentBps / 1024)
+                        currentBps > 0 -> "%.0f KB/s".format(currentBps.coerceAtLeast(1.0))
+                        else -> if (player.isPlaying) "Active" else "Idle"
                     }
                     _downloadSpeed.value = speedStr
 
-                    val now = System.currentTimeMillis()
                     if (now - lastSaveTick > 4000L && player.isPlaying) {
                         lastSaveTick = now
                         saveCurrentProgress()
                     }
                 }
-                delay(300)
+                delay(350)
             }
         }
     }

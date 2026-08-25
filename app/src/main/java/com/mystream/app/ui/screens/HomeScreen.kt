@@ -82,6 +82,13 @@ import com.mystream.app.ui.theme.TextSecondary
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.platform.LocalContext
 import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material.icons.filled.Mic
 import com.mystream.app.ui.components.ExitConfirmationDialog
 import com.mystream.app.ui.theme.FocusRingOrange
 import androidx.compose.ui.input.key.Key
@@ -110,29 +117,47 @@ fun HomeScreen(
     val watchlist by repository.watchlistFlow.collectAsState(initial = emptyList())
 
     val heroPlayFocusRequester = remember { FocusRequester() }
+    val searchFocusRequester = remember { FocusRequester() }
+    val micFocusRequester = remember { FocusRequester() }
     val continueWatchingFirstItemFR = remember { FocusRequester() }
     val watchlistFirstItemFR = remember { FocusRequester() }
+
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spokenText.isNullOrBlank()) {
+                SearchStateHolder.query = spokenText
+                onNavigateToSearch()
+            }
+        }
+    }
+
+    fun launchVoiceSearch() {
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Search movies, series, cast...")
+            }
+            speechRecognizerLauncher.launch(intent)
+        } catch (e: Exception) {
+            onNavigateToSearch()
+        }
+    }
 
     val dynamicRowFirstItemFRs = remember { mutableMapOf<Int, FocusRequester>() }
     fun getDynamicRowFirstItemFR(index: Int): FocusRequester = dynamicRowFirstItemFRs.getOrPut(index) { FocusRequester() }
 
-    val dynamicRowSeeMoreFRs = remember { mutableMapOf<Int, FocusRequester>() }
-    fun getDynamicRowSeeMoreFR(index: Int): FocusRequester = dynamicRowSeeMoreFRs.getOrPut(index) { FocusRequester() }
-
     val row1FirstItemFR = remember { FocusRequester() }
-    val row1SeeMoreFR = remember { FocusRequester() }
-
     val row2FirstItemFR = remember { FocusRequester() }
-    val row2SeeMoreFR = remember { FocusRequester() }
-
     val row3FirstItemFR = remember { FocusRequester() }
-    val row3SeeMoreFR = remember { FocusRequester() }
-
     val row4FirstItemFR = remember { FocusRequester() }
-    val row4SeeMoreFR = remember { FocusRequester() }
-
     val row5FirstItemFR = remember { FocusRequester() }
-    val row5SeeMoreFR = remember { FocusRequester() }
+
+    val rowScrollStates = remember { mutableMapOf<String, androidx.compose.foundation.lazy.LazyListState>() }
+    val continueWatchingListState = rememberLazyListState()
+    val watchlistListState = rememberLazyListState()
 
     var indianCategories by remember { mutableStateOf<List<Pair<String, List<StremioMetaPreview>>>>(emptyList()) }
 
@@ -352,15 +377,110 @@ fun HomeScreen(
                             )
                         }
 
-                        IconButton(
-                            onClick = onNavigateToSearch,
-                            modifier = Modifier.align(Alignment.Center)
+                        // Wide Search Bar with type hint and direct embedded voice search
+                        val searchInteraction = remember { MutableInteractionSource() }
+                        val isSearchFocused by searchInteraction.collectIsFocusedAsState()
+                        val micInteraction = remember { MutableInteractionSource() }
+                        val isMicFocused by micInteraction.collectIsFocusedAsState()
+
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .widthIn(min = 280.dp, max = 450.dp)
+                                .height(44.dp)
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(Color(0x6607090E))
+                                .border(
+                                    width = 1.dp,
+                                    color = Color(0x33FFFFFF),
+                                    shape = RoundedCornerShape(22.dp)
+                                )
+                                .padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Search",
-                                tint = TextSecondary
-                            )
+                            // Search Text Input Pill (Independently focusable via D-pad)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(if (isSearchFocused) FocusRingOrange.copy(alpha = 0.22f) else Color.Transparent)
+                                    .border(
+                                        width = if (isSearchFocused) 2.dp else 0.dp,
+                                        color = if (isSearchFocused) FocusRingOrange else Color.Transparent,
+                                        shape = RoundedCornerShape(18.dp)
+                                    )
+                                    .focusRequester(searchFocusRequester)
+                                    .focusable(interactionSource = searchInteraction)
+                                    .onPreviewKeyEvent { keyEvent ->
+                                        if (keyEvent.type == KeyEventType.KeyDown) {
+                                            when (keyEvent.key) {
+                                                Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                                    onNavigateToSearch()
+                                                    true
+                                                }
+                                                else -> false
+                                            }
+                                        } else false
+                                    }
+                                    .clickable(interactionSource = searchInteraction, indication = null, onClick = onNavigateToSearch)
+                                    .padding(horizontal = 12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Search",
+                                    tint = if (isSearchFocused) FocusRingOrange else SecondaryCyan,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Search movies, series, cast...",
+                                    color = if (isSearchFocused) TextPrimary else TextMuted,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            // Voice Mic Button (Independently focusable via D-pad)
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isMicFocused) FocusRingOrange else Color(0x22FFFFFF))
+                                    .border(
+                                        width = if (isMicFocused) 2.dp else 1.dp,
+                                        color = if (isMicFocused) FocusRingOrange else Color(0x22FFFFFF),
+                                        shape = CircleShape
+                                    )
+                                    .focusRequester(micFocusRequester)
+                                    .focusable(interactionSource = micInteraction)
+                                    .onPreviewKeyEvent { keyEvent ->
+                                        if (keyEvent.type == KeyEventType.KeyDown) {
+                                            when (keyEvent.key) {
+                                                Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                                    launchVoiceSearch()
+                                                    true
+                                                }
+                                                else -> false
+                                            }
+                                        } else false
+                                    }
+                                    .clickable(interactionSource = micInteraction, indication = null) {
+                                        launchVoiceSearch()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = "Voice Search",
+                                    tint = if (isMicFocused) Color.Black else SecondaryCyan,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
 
                         Row(
@@ -452,6 +572,7 @@ fun HomeScreen(
                             }
 
                             LazyRow(
+                                state = continueWatchingListState,
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
@@ -545,6 +666,7 @@ fun HomeScreen(
                             }
 
                             LazyRow(
+                                state = watchlistListState,
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
@@ -581,8 +703,8 @@ fun HomeScreen(
                     MediaCatalogRow(
                         title = catKey,
                         items = catItems,
+                        scrollState = rowScrollStates.getOrPut("indian_$catKey") { androidx.compose.foundation.lazy.LazyListState() },
                         firstItemFocusRequester = getDynamicRowFirstItemFR(idx),
-                        seeMoreFocusRequester = getDynamicRowSeeMoreFR(idx),
                         onSeeMoreClick = {
                             onNavigateToCatalog(catKey, "movie", "imdb-indian", catKey)
                         },
@@ -596,8 +718,8 @@ fun HomeScreen(
                         MediaCatalogRow(
                             title = "Popular Movies",
                             items = topMovies,
+                            scrollState = rowScrollStates.getOrPut("cat_top_movies") { androidx.compose.foundation.lazy.LazyListState() },
                             firstItemFocusRequester = row1FirstItemFR,
-                            seeMoreFocusRequester = row1SeeMoreFR,
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Popular Movies", "movie", "top", null)
                             },
@@ -612,8 +734,8 @@ fun HomeScreen(
                         MediaCatalogRow(
                             title = "Popular Series",
                             items = topSeries,
+                            scrollState = rowScrollStates.getOrPut("cat_top_series") { androidx.compose.foundation.lazy.LazyListState() },
                             firstItemFocusRequester = row2FirstItemFR,
-                            seeMoreFocusRequester = row2SeeMoreFR,
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Popular Series", "series", "top", null)
                             },
@@ -628,8 +750,8 @@ fun HomeScreen(
                         MediaCatalogRow(
                             title = "Action & Adventure",
                             items = actionMovies,
+                            scrollState = rowScrollStates.getOrPut("cat_action_movies") { androidx.compose.foundation.lazy.LazyListState() },
                             firstItemFocusRequester = row3FirstItemFR,
-                            seeMoreFocusRequester = row3SeeMoreFR,
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Action & Adventure", "movie", "top", "Action")
                             },
@@ -644,8 +766,8 @@ fun HomeScreen(
                         MediaCatalogRow(
                             title = "Sci-Fi & Thriller",
                             items = scifiMovies,
+                            scrollState = rowScrollStates.getOrPut("cat_scifi_movies") { androidx.compose.foundation.lazy.LazyListState() },
                             firstItemFocusRequester = row4FirstItemFR,
-                            seeMoreFocusRequester = row4SeeMoreFR,
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Sci-Fi & Thriller", "movie", "top", "Sci-Fi")
                             },
@@ -660,8 +782,8 @@ fun HomeScreen(
                         MediaCatalogRow(
                             title = "Binge-Worthy Comedies",
                             items = comedySeries,
+                            scrollState = rowScrollStates.getOrPut("cat_comedy_series") { androidx.compose.foundation.lazy.LazyListState() },
                             firstItemFocusRequester = row5FirstItemFR,
-                            seeMoreFocusRequester = row5SeeMoreFR,
                             onSeeMoreClick = {
                                 onNavigateToCatalog("Binge-Worthy Comedies", "series", "top", "Comedy")
                             },
@@ -737,9 +859,9 @@ fun HomeScreen(
 private fun MediaCatalogRow(
     title: String,
     items: List<StremioMetaPreview>,
+    scrollState: androidx.compose.foundation.lazy.LazyListState,
     firstItemFocusRequester: FocusRequester,
-    seeMoreFocusRequester: FocusRequester,
-    onSeeMoreClick: () -> Unit,
+    onSeeMoreClick: (() -> Unit)? = null,
     onItemClick: (StremioMetaPreview) -> Unit
 ) {
     Column(
@@ -762,57 +884,16 @@ private fun MediaCatalogRow(
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold
             )
-
-            val seeMoreInteraction = remember { MutableInteractionSource() }
-            val isSeeMoreFocused by seeMoreInteraction.collectIsFocusedAsState()
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier
-                    .focusRequester(seeMoreFocusRequester)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (isSeeMoreFocused) FocusRingOrange else PrimaryNeon.copy(alpha = 0.15f))
-                    .border(
-                        width = if (isSeeMoreFocused) 2.5.dp else 1.dp,
-                        color = if (isSeeMoreFocused) FocusRingOrange else PrimaryNeon.copy(alpha = 0.4f),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    .focusable(interactionSource = seeMoreInteraction)
-                    .onPreviewKeyEvent { keyEvent ->
-                        if (keyEvent.type == KeyEventType.KeyDown) {
-                            when (keyEvent.key) {
-                                Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                                    onSeeMoreClick()
-                                    true
-                                }
-                                else -> false
-                            }
-                        } else false
-                    }
-                    .clickable(interactionSource = seeMoreInteraction, indication = null, onClick = onSeeMoreClick)
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-            ) {
-                Text(
-                    text = "See More",
-                    color = if (isSeeMoreFocused) Color.Black else PrimaryNeon,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                    contentDescription = null,
-                    tint = if (isSeeMoreFocused) Color.Black else PrimaryNeon,
-                    modifier = Modifier.size(13.dp)
-                )
-            }
         }
 
+        val displayItems = remember(items) { items.take(15) }
+
         LazyRow(
+            state = scrollState,
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            itemsIndexed(items, key = { _, meta -> meta.id }) { index, meta ->
+            itemsIndexed(displayItems, key = { _, meta -> meta.id }) { index, meta ->
                 PosterCard(
                     item = meta,
                     modifier = if (index == 0) Modifier.focusRequester(firstItemFocusRequester) else Modifier,
@@ -820,8 +901,13 @@ private fun MediaCatalogRow(
                 )
             }
 
-            item {
-                SeeMoreGridCard(onClick = onSeeMoreClick)
+            if (onSeeMoreClick != null && items.size >= 8) {
+                item(key = "seemore_${title}") {
+                    SeeMoreGridCard(
+                        title = title,
+                        onClick = onSeeMoreClick
+                    )
+                }
             }
         }
     }
@@ -829,6 +915,7 @@ private fun MediaCatalogRow(
 
 @Composable
 private fun SeeMoreGridCard(
+    title: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -836,17 +923,29 @@ private fun SeeMoreGridCard(
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     val borderColor = if (isFocused) FocusRingOrange else Color(0x22FFFFFF)
-    val bgColor = if (isFocused) FocusRingOrange.copy(alpha = 0.15f) else SurfaceDark
+    val bgColor = if (isFocused) FocusRingOrange.copy(alpha = 0.18f) else SurfaceDark
 
     Box(
         modifier = modifier
-            .width(135.dp)
+            .width(140.dp)
             .aspectRatio(2f / 3f)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(bgColor)
-            .border(if (isFocused) 2.5.dp else 1.dp, borderColor, RoundedCornerShape(12.dp))
+            .border(if (isFocused) 2.5.dp else 1.dp, borderColor, RoundedCornerShape(14.dp))
             .focusable(interactionSource = interactionSource)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type == KeyEventType.KeyDown) {
+                    when (keyEvent.key) {
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                            onClick()
+                            true
+                        }
+                        else -> false
+                    }
+                } else false
+            }
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .padding(8.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -855,9 +954,9 @@ private fun SeeMoreGridCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(46.dp)
                     .clip(CircleShape)
-                    .background(if (isFocused) FocusRingOrange.copy(alpha = 0.2f) else PrimaryNeon.copy(alpha = 0.2f)),
+                    .background(if (isFocused) FocusRingOrange.copy(alpha = 0.25f) else PrimaryNeon.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -870,14 +969,14 @@ private fun SeeMoreGridCard(
             Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = "See All",
-                color = TextPrimary,
-                fontSize = 13.sp,
+                color = if (isFocused) FocusRingOrange else TextPrimary,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Open full grid",
+                text = "Explore full list",
                 color = TextMuted,
-                fontSize = 10.sp
+                fontSize = 10.5.sp
             )
         }
     }

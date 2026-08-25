@@ -1,8 +1,13 @@
 package com.mystream.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,24 +22,35 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Subtitles
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.mystream.app.data.model.PlayerTrackInfo
+import com.mystream.app.ui.theme.EmeraldNeon
+import com.mystream.app.ui.theme.FocusRingOrange
+import com.mystream.app.ui.theme.GlassBorder
+import com.mystream.app.ui.theme.GlassBorderStrong
+import com.mystream.app.ui.theme.GlassSurface
 import com.mystream.app.ui.theme.PrimaryNeon
 import com.mystream.app.ui.theme.SecondaryCyan
-import com.mystream.app.ui.theme.SurfaceCard
-import com.mystream.app.ui.theme.SurfaceDark
+import com.mystream.app.ui.theme.TextMuted
 import com.mystream.app.ui.theme.TextPrimary
 import com.mystream.app.ui.theme.TextSecondary
 
@@ -46,12 +62,14 @@ fun SubtitleTrackSelectorDialog(
     onDismiss: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {
-        Card(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceDark)
+                .padding(16.dp)
+                .shadow(24.dp, RoundedCornerShape(18.dp), ambientColor = Color.Black)
+                .clip(RoundedCornerShape(18.dp))
+                .background(GlassSurface)
+                .border(1.5.dp, GlassBorderStrong, RoundedCornerShape(18.dp))
         ) {
             Column(
                 modifier = Modifier
@@ -65,14 +83,22 @@ fun SubtitleTrackSelectorDialog(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Subtitles,
-                            contentDescription = null,
-                            tint = SecondaryCyan,
-                            modifier = Modifier.size(24.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(SecondaryCyan.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Subtitles,
+                                contentDescription = null,
+                                tint = SecondaryCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                         Text(
                             text = "Subtitles",
                             color = TextPrimary,
@@ -92,69 +118,120 @@ fun SubtitleTrackSelectorDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // "Off" option
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (!isSubtitleEnabled) SecondaryCyan.copy(alpha = 0.2f) else SurfaceCard)
-                        .clickable {
-                            onSelectTrack(null)
-                            onDismiss()
-                        }
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Off",
-                        color = if (!isSubtitleEnabled) SecondaryCyan else TextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = if (!isSubtitleEnabled) FontWeight.Bold else FontWeight.Normal
-                    )
-
-                    if (!isSubtitleEnabled) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Selected",
-                            tint = SecondaryCyan,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(tracks) { track ->
-                        val isSelected = isSubtitleEnabled && track.isSelected
+                    // Option to turn OFF subtitles
+                    item {
+                        val offInteraction = remember { MutableInteractionSource() }
+                        val isOffFocused by offInteraction.collectIsFocusedAsState()
+                        val isOffSelected = !isSubtitleEnabled
+
+                        val itemBg = if (isOffFocused) FocusRingOrange.copy(alpha = 0.25f)
+                        else if (isOffSelected) SecondaryCyan.copy(alpha = 0.2f)
+                        else Color(0x1AFFFFFF)
+
+                        val itemBorder = if (isOffFocused) FocusRingOrange
+                        else if (isOffSelected) SecondaryCyan
+                        else GlassBorder
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) SecondaryCyan.copy(alpha = 0.2f) else SurfaceCard)
-                                .clickable {
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(itemBg)
+                                .border(if (isOffFocused) 2.dp else 1.dp, itemBorder, RoundedCornerShape(12.dp))
+                                .focusable(interactionSource = offInteraction)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.DirectionCenter || keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter || keyEvent.key == Key.Spacebar)) {
+                                        onSelectTrack(null)
+                                        onDismiss()
+                                        true
+                                    } else false
+                                }
+                                .clickable(interactionSource = offInteraction, indication = null) {
+                                    onSelectTrack(null)
+                                    onDismiss()
+                                }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Off (Disable Subtitles)",
+                                color = if (isOffFocused) FocusRingOrange else TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = if (isOffSelected || isOffFocused) FontWeight.Bold else FontWeight.Medium
+                            )
+
+                            if (isOffSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = if (isOffFocused) FocusRingOrange else EmeraldNeon,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    items(tracks) { track ->
+                        val itemInteraction = remember { MutableInteractionSource() }
+                        val isFocused by itemInteraction.collectIsFocusedAsState()
+                        val isTrackSelected = isSubtitleEnabled && track.isSelected
+
+                        val itemBg = if (isFocused) FocusRingOrange.copy(alpha = 0.25f)
+                        else if (isTrackSelected) SecondaryCyan.copy(alpha = 0.2f)
+                        else Color(0x1AFFFFFF)
+
+                        val itemBorder = if (isFocused) FocusRingOrange
+                        else if (isTrackSelected) SecondaryCyan
+                        else GlassBorder
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(itemBg)
+                                .border(if (isFocused) 2.dp else 1.dp, itemBorder, RoundedCornerShape(12.dp))
+                                .focusable(interactionSource = itemInteraction)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.DirectionCenter || keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter || keyEvent.key == Key.Spacebar)) {
+                                        onSelectTrack(track)
+                                        onDismiss()
+                                        true
+                                    } else false
+                                }
+                                .clickable(interactionSource = itemInteraction, indication = null) {
                                     onSelectTrack(track)
                                     onDismiss()
                                 }
                                 .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = track.label,
-                                color = if (isSelected) SecondaryCyan else TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = track.label,
+                                    color = if (isFocused) FocusRingOrange else TextPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (isTrackSelected || isFocused) FontWeight.Bold else FontWeight.Medium
+                                )
+                                if (!track.language.isNullOrBlank()) {
+                                    Text(
+                                        text = track.language.uppercase(),
+                                        color = TextMuted,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
 
-                            if (isSelected) {
+                            if (isTrackSelected) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = "Selected",
-                                    tint = SecondaryCyan,
+                                    tint = if (isFocused) FocusRingOrange else EmeraldNeon,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }

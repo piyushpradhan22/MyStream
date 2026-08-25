@@ -1,6 +1,8 @@
 package com.mystream.app.ui.components
 
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,7 +32,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,11 +41,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,8 +49,12 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.mystream.app.data.model.StremioMetaPreview
 import com.mystream.app.ui.theme.FocusRingOrange
+import com.mystream.app.ui.theme.FocusRingOrangeGlow
+import com.mystream.app.ui.theme.GlassBorder
+import com.mystream.app.ui.theme.GlassSurface
 import com.mystream.app.ui.theme.ImdbGold
 import com.mystream.app.ui.theme.PrimaryNeon
+import com.mystream.app.ui.theme.SecondaryCyan
 import com.mystream.app.ui.theme.SurfaceCard
 import com.mystream.app.ui.theme.TextMuted
 import com.mystream.app.ui.theme.TextPrimary
@@ -79,13 +79,17 @@ fun PosterCard(
 
     val scale by animateFloatAsState(
         targetValue = if (isFocused || isHovered) 1.08f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
         label = "cardScale"
     )
 
     val borderModifier = if (isFocused) {
-        Modifier.border(2.5.dp, FocusRingOrange, RoundedCornerShape(12.dp))
+        Modifier.border(2.5.dp, FocusRingOrange, RoundedCornerShape(14.dp))
     } else {
-        Modifier.border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(12.dp))
+        Modifier.border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
     }
 
     val widthModifier = if (width > 0) Modifier.width(width.dp) else Modifier.fillMaxWidth()
@@ -107,8 +111,13 @@ fun PosterCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .shadow(if (isFocused) 12.dp else 4.dp, RoundedCornerShape(12.dp))
-                .clip(RoundedCornerShape(12.dp))
+                .shadow(
+                    elevation = if (isFocused) 16.dp else 6.dp,
+                    shape = RoundedCornerShape(14.dp),
+                    ambientColor = if (isFocused) FocusRingOrangeGlow else Color.Black,
+                    spotColor = if (isFocused) FocusRingOrange else Color.Black
+                )
+                .clip(RoundedCornerShape(14.dp))
                 .background(SurfaceCard)
                 .then(borderModifier)
         ) {
@@ -125,7 +134,7 @@ fun PosterCard(
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color(0xFF2C3E50), Color(0xFF000000))
+                                listOf(Color(0xFF1E293B), Color(0xFF0F172A))
                             )
                         ),
                     contentAlignment = Alignment.Center
@@ -139,7 +148,20 @@ fun PosterCard(
                 }
             }
 
-            // Clear from Continue Watching / Watchlist Button (touch-enabled, non-D-pad-stealing)
+            // Subtle bottom shadow vignette for badge readability
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color(0xCC07090E))
+                        )
+                    )
+            )
+
+            // Clear from Continue Watching / Watchlist Button (touch-enabled)
             if (onClearClick != null) {
                 Box(
                     modifier = Modifier
@@ -148,11 +170,7 @@ fun PosterCard(
                         .size(24.dp)
                         .clip(CircleShape)
                         .background(Color(0xD9000000))
-                        .border(
-                            1.dp,
-                            Color(0x66FFFFFF),
-                            CircleShape
-                        )
+                        .border(1.dp, Color(0x66FFFFFF), CircleShape)
                         .clickable(interactionSource = clearInteractionSource, indication = null) { onClearClick() },
                     contentAlignment = Alignment.Center
                 ) {
@@ -172,8 +190,9 @@ fun PosterCard(
                         .align(if (onClearClick != null) Alignment.TopStart else Alignment.TopEnd)
                         .padding(6.dp)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xCC000000))
-                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                        .background(GlassSurface)
+                        .border(0.5.dp, Color(0x33FFC000), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 5.dp, vertical = 2.5.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -183,12 +202,12 @@ fun PosterCard(
                             imageVector = Icons.Default.Star,
                             contentDescription = "Rating",
                             tint = ImdbGold,
-                            modifier = Modifier.size(11.dp)
+                            modifier = Modifier.size(10.5.dp)
                         )
                         Text(
                             text = item.imdbRating,
                             color = TextPrimary,
-                            fontSize = 11.sp,
+                            fontSize = 10.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -202,14 +221,15 @@ fun PosterCard(
                         .align(Alignment.BottomStart)
                         .padding(horizontal = 6.dp, vertical = if (progressFraction != null && progressFraction > 0f) 8.dp else 6.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(Color(0x99000000))
-                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                        .background(Color(0xB307090E))
+                        .padding(horizontal = 4.5.dp, vertical = 1.5.dp)
                 ) {
                     Text(
                         text = item.type.uppercase(),
                         color = TextSecondary,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
                     )
                 }
             }
@@ -220,14 +240,18 @@ fun PosterCard(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .height(4.5.dp)
+                        .height(4.dp)
                         .background(Color(0x88000000))
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(fraction = progressFraction.coerceIn(0.03f, 1f))
                             .fillMaxSize()
-                            .background(PrimaryNeon)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(PrimaryNeon, SecondaryCyan)
+                                )
+                            )
                     )
                 }
             }

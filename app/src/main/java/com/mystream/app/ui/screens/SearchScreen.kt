@@ -30,6 +30,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -37,6 +38,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -105,57 +112,16 @@ fun SearchScreen(
     var isSearching by remember { mutableStateOf(false) }
     var isSearchEditing by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var searchJob by remember { mutableStateOf<Job?>(null) }
     val searchFocusRequester = remember { FocusRequester() }
+    val micFocusRequester = remember { FocusRequester() }
     var isSearchFieldFocused by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val density = LocalDensity.current
     val isImeVisible = WindowInsets.ime.getBottom(density) > 0
     val isEditing = isImeVisible || isSearchEditing
-
-    LaunchedEffect(query, rawResults, selectedFilter, trendingItems) {
-        SearchStateHolder.query = query
-        SearchStateHolder.rawResults = rawResults
-        SearchStateHolder.selectedFilter = selectedFilter
-        SearchStateHolder.trendingItems = trendingItems
-    }
-
-    fun enterSearchEditingMode() {
-        isSearchEditing = true
-        scope.launch {
-            repeat(3) {
-                if (!isSearchFieldFocused) {
-                    searchFocusRequester.safeRequestFocus()
-                }
-                delay(40)
-            }
-        }
-    }
-
-    LaunchedEffect(isImeVisible) {
-        if (!isImeVisible) {
-            isSearchEditing = false
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        if (query.isBlank()) {
-            delay(120)
-            searchFocusRequester.safeRequestFocus()
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        if (trendingItems.isEmpty()) {
-            try {
-                val movies = repository.fetchCatalog("movie", "top", skip = 0).metas
-                val series = repository.fetchCatalog("series", "top", skip = 0).metas
-                trendingItems = (movies + series).distinctBy { it.id }
-            } catch (_: Exception) {
-            }
-        }
-    }
 
     fun performSearch(text: String) {
         val clean = text.trim()
@@ -204,9 +170,7 @@ fun SearchScreen(
                 }
             } catch (e: CancellationException) {
                 // DO NOT wipe rawResults on cancellation! A newer search job is already running.
-                throw e
-            } catch (e: Exception) {
-                android.util.Log.e("SearchScreen", "Search error for '$clean'", e)
+            } catch (_: Exception) {
                 if (isActive) {
                     rawResults = emptyList()
                 }
@@ -214,6 +178,74 @@ fun SearchScreen(
                 if (isActive) {
                     isSearching = false
                 }
+            }
+        }
+    }
+
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spokenText.isNullOrBlank()) {
+                query = spokenText
+                SearchStateHolder.query = spokenText
+                performSearch(spokenText)
+            }
+        }
+    }
+
+    fun launchVoiceSearch() {
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Search movies and series...")
+            }
+            speechRecognizerLauncher.launch(intent)
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(context, "Voice search is not available", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(query, rawResults, selectedFilter, trendingItems) {
+        SearchStateHolder.query = query
+        SearchStateHolder.rawResults = rawResults
+        SearchStateHolder.selectedFilter = selectedFilter
+        SearchStateHolder.trendingItems = trendingItems
+    }
+
+    fun enterSearchEditingMode() {
+        isSearchEditing = true
+        scope.launch {
+            repeat(3) {
+                if (!isSearchFieldFocused) {
+                    searchFocusRequester.safeRequestFocus()
+                }
+                delay(40)
+            }
+        }
+    }
+
+    LaunchedEffect(isImeVisible) {
+        if (!isImeVisible) {
+            isSearchEditing = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (query.isBlank()) {
+            delay(120)
+            searchFocusRequester.safeRequestFocus()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (trendingItems.isEmpty()) {
+            try {
+                val movies = repository.fetchCatalog("movie", "top", skip = 0).metas
+                val series = repository.fetchCatalog("series", "top", skip = 0).metas
+                trendingItems = (movies + series).distinctBy { it.id }
+            } catch (_: Exception) {
             }
         }
     }
@@ -297,17 +329,23 @@ fun SearchScreen(
                         )
                     },
                     trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = {
-                                query = ""
-                                rawResults = emptyList()
-                                searchFocusRequester.safeRequestFocus()
-                            }) {
-                                Icon(
-                                    imageVector = Icons.Default.Clear,
-                                    contentDescription = "Clear",
-                                    tint = TextSecondary
-                                )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(end = 4.dp)
+                        ) {
+                            if (query.isNotEmpty()) {
+                                IconButton(onClick = {
+                                    query = ""
+                                    rawResults = emptyList()
+                                    searchFocusRequester.safeRequestFocus()
+                                }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "Clear",
+                                        tint = TextSecondary
+                                    )
+                                }
                             }
                         }
                     },
@@ -356,6 +394,45 @@ fun SearchScreen(
                             } else false
                         }
                 )
+
+                val micInteraction = remember { MutableInteractionSource() }
+                val isMicFocused by micInteraction.collectIsFocusedAsState()
+
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isMicFocused) FocusRingOrange else SurfaceDark)
+                        .border(
+                            width = if (isMicFocused) 2.dp else 1.dp,
+                            color = if (isMicFocused) FocusRingOrange else Color(0x33FFFFFF),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .focusRequester(micFocusRequester)
+                        .focusable(interactionSource = micInteraction)
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                when (keyEvent.key) {
+                                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                        launchVoiceSearch()
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            } else false
+                        }
+                        .clickable(interactionSource = micInteraction, indication = null) {
+                            launchVoiceSearch()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = "Voice Search",
+                        tint = if (isMicFocused) Color.Black else FocusRingOrange,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))

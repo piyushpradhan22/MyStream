@@ -1,6 +1,6 @@
 {
-  "versionCode": 12,
-  "versionName": "1.0.11",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.11/app-universal-release.apk",
-  "changelog": "• Thread-safe PikPak session management preventing worker race conditions & account collisions\n• Prioritized selected_email database view for randomized fresh account pooling\n• Upgraded player streaming engine to resilient OkHttp transport with HTTP/1.1 range compatibility\n• Improved stream header forwarding and reliable media resolution"
+  "versionCode": 13,
+  "versionName": "1.0.12",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.12/app-universal-release.apk",
+  "changelog": "• Complete Modern TV UI/UX overhaul with frosted glass cards, dynamic hero banner, and refined typography\n• Wide Search Bar with type hint and direct embedded D-pad reachable Voice Search\n• High-frequency real-time download speed monitoring in player console\n• Trailing 'See All' infinite scrolling catalog cards on category rows\n• Persistent horizontal scroll state preservation across all categories and rows\n• Modern Player HUD with circular progress thumb, animated controls, and transparent pills\n• Streams loading status spinner during background stream resolution"
 }

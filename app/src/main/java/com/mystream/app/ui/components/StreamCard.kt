@@ -25,15 +25,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -46,7 +44,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mystream.app.data.model.StremioStreamSource
 import com.mystream.app.ui.theme.AccentAmber
+import com.mystream.app.ui.theme.EmeraldNeon
 import com.mystream.app.ui.theme.FocusRingOrange
+import com.mystream.app.ui.theme.FocusRingOrangeGlow
+import com.mystream.app.ui.theme.GlassBorder
+import com.mystream.app.ui.theme.GlassBorderStrong
+import com.mystream.app.ui.theme.GlassSurface
 import com.mystream.app.ui.theme.PrimaryNeon
 import com.mystream.app.ui.theme.SecondaryCyan
 import com.mystream.app.ui.theme.SurfaceCard
@@ -81,8 +84,8 @@ fun StreamCard(
     val isMagnetFocused by magnetInteractionSource.collectIsFocusedAsState()
 
     val isAnyFocused = isCardFocused || isMagnetFocused || isRestartFocused
-    val borderColor = if (isAnyFocused) FocusRingOrange else Color(0x22FFFFFF)
-    val bgColor = if (isAnyFocused) FocusRingOrange.copy(alpha = 0.12f) else SurfaceCard
+    val borderColor = if (isAnyFocused) FocusRingOrange else GlassBorder
+    val bgColor = if (isAnyFocused) Color(0xFF151C2C) else GlassSurface
 
     val shouldMarquee = isAnyFocused
 
@@ -96,17 +99,17 @@ fun StreamCard(
     val fileName = stream.behaviorHints?.bingeGroup?.takeIf { it.isNotBlank() && it != torrentName }
         ?: titleLines.getOrNull(1)?.takeIf { !it.contains("💾") && !it.contains("👤") && it != torrentName }
 
-    // Outer Card Container: clean non-clickable Row containing Card Body & Action Buttons as direct siblings
+    // Outer Card Container
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(bgColor)
-            .border(if (isAnyFocused) 2.dp else 1.dp, borderColor, RoundedCornerShape(12.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .border(if (isAnyFocused) 2.dp else 1.dp, borderColor, RoundedCornerShape(14.dp))
+            .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 1. Main Clickable Card Body (takes full remaining width)
+        // 1. Main Clickable Card Body
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -140,33 +143,46 @@ fun StreamCard(
                     onClick = onClick
                 )
         ) {
-            // Badges (Quality, HDR, Hindi, Provider)
+            // Badges (Quality, HDR, Hindi, Provider, Cloud Status)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Quality Badge
-                val is4k = stream.quality.contains("4K")
+                // Quality Spec Pill
+                val is4k = stream.quality.contains("4K", ignoreCase = true)
+                val is1080 = stream.quality.contains("1080", ignoreCase = true)
+                val badgeBg = when {
+                    is4k -> EmeraldNeon
+                    is1080 -> PrimaryNeon
+                    else -> SecondaryCyan
+                }
+                val badgeText = when {
+                    is4k -> Color.Black
+                    else -> Color.White
+                }
+
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(if (is4k) AccentAmber else PrimaryNeon)
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(badgeBg)
+                        .padding(horizontal = 6.5.dp, vertical = 2.dp)
                 ) {
                     Text(
                         text = stream.quality,
-                        color = if (is4k) Color.Black else Color.White,
+                        color = badgeText,
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.5.sp
                     )
                 }
 
-                // HDR Badge if available
+                // HDR / Dolby Vision Badge if available
                 stream.hdrType?.let { hdr ->
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(RoundedCornerShape(5.dp))
                             .background(SecondaryCyan.copy(alpha = 0.2f))
+                            .border(0.5.dp, SecondaryCyan.copy(alpha = 0.4f), RoundedCornerShape(5.dp))
                             .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
                         Text(
@@ -182,8 +198,9 @@ fun StreamCard(
                 if (stream.hasHindiAudio) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(RoundedCornerShape(5.dp))
                             .background(Color(0xFFE65100))
+                            .border(0.5.dp, Color(0xFFFF9800), RoundedCornerShape(5.dp))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
@@ -199,23 +216,24 @@ fun StreamCard(
                 stream.providerName?.let { provider ->
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0x33FFFFFF))
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(Color(0x2AFFFFFF))
+                            .border(0.5.dp, GlassBorder, RoundedCornerShape(5.dp))
                             .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = provider,
-                            color = TextSecondary,
+                            text = if (provider.equals("PP", ignoreCase = true) || provider.contains("PikPak", ignoreCase = true)) "PP" else provider,
+                            color = EmeraldNeon,
                             fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(7.dp))
 
-            // Line 1: Torrent / Release Name (Marquee only when focused/selected)
+            // Line 1: Torrent / Release Name
             Text(
                 text = torrentName,
                 color = if (isCardFocused) FocusRingOrange else TextPrimary,
@@ -226,7 +244,7 @@ fun StreamCard(
                 modifier = if (shouldMarquee) Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE) else Modifier.fillMaxWidth()
             )
 
-            // Line 2: File Name (Marquee only when focused/selected)
+            // Line 2: File Name (if different)
             if (!fileName.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
@@ -257,7 +275,7 @@ fun StreamCard(
             }
         }
 
-        // 2. Action Buttons (Direct Sibling to Card Body -> Seamless D-pad Focus)
+        // 2. Action Buttons
         if (isResolving || onMagnetStream != null || onRestart != null) {
             Spacer(modifier = Modifier.width(10.dp))
             Row(
@@ -268,12 +286,12 @@ fun StreamCard(
                 if (onMagnetStream != null && !isResolving) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (isMagnetFocused) AccentAmber.copy(alpha = 0.35f) else AccentAmber.copy(alpha = 0.2f))
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isMagnetFocused) AccentAmber.copy(alpha = 0.35f) else AccentAmber.copy(alpha = 0.18f))
                             .border(
                                 if (isMagnetFocused) 2.dp else 1.dp,
                                 if (isMagnetFocused) FocusRingOrange else AccentAmber.copy(alpha = 0.5f),
-                                RoundedCornerShape(6.dp)
+                                RoundedCornerShape(8.dp)
                             )
                             .focusRequester(magnetFocusRequester)
                             .onPreviewKeyEvent { keyEvent ->
@@ -314,7 +332,7 @@ fun StreamCard(
                                 indication = null,
                                 onClick = onMagnetStream
                             )
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                            .padding(horizontal = 11.dp, vertical = 7.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -335,12 +353,12 @@ fun StreamCard(
                 } else if (onRestart != null) {
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
                             .background(if (isRestartFocused) FocusRingOrange.copy(alpha = 0.25f) else SurfaceDark)
                             .border(
                                 if (isRestartFocused) 2.dp else 1.dp,
-                                if (isRestartFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                if (isRestartFocused) FocusRingOrange else GlassBorderStrong,
                                 CircleShape
                             )
                             .focusRequester(restartFocusRequester)
