@@ -1,6 +1,6 @@
 {
-  "versionCode": 13,
-  "versionName": "1.0.12",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.12/app-universal-release.apk",
-  "changelog": "• Complete Modern TV UI/UX overhaul with frosted glass cards, dynamic hero banner, and refined typography\n• Wide Search Bar with type hint and direct embedded D-pad reachable Voice Search\n• High-frequency real-time download speed monitoring in player console\n• Trailing 'See All' infinite scrolling catalog cards on category rows\n• Persistent horizontal scroll state preservation across all categories and rows\n• Modern Player HUD with circular progress thumb, animated controls, and transparent pills\n• Streams loading status spinner during background stream resolution"
+  "versionCode": 14,
+  "versionName": "1.0.13",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.13/app-universal-release.apk",
+  "changelog": "• Dynamically responsive Top Search Bar automatically adapting across mobile portrait, tablet, and TV landscape\n• Clean minimalist branding: Logo icon header without text label\n• Streamlined search input with fast D-pad navigation"
 }

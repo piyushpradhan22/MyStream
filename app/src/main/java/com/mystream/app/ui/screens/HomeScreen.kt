@@ -118,33 +118,8 @@ fun HomeScreen(
 
     val heroPlayFocusRequester = remember { FocusRequester() }
     val searchFocusRequester = remember { FocusRequester() }
-    val micFocusRequester = remember { FocusRequester() }
     val continueWatchingFirstItemFR = remember { FocusRequester() }
     val watchlistFirstItemFR = remember { FocusRequester() }
-
-    val speechRecognizerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-            if (!spokenText.isNullOrBlank()) {
-                SearchStateHolder.query = spokenText
-                onNavigateToSearch()
-            }
-        }
-    }
-
-    fun launchVoiceSearch() {
-        try {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Search movies, series, cast...")
-            }
-            speechRecognizerLauncher.launch(intent)
-        } catch (e: Exception) {
-            onNavigateToSearch()
-        }
-    }
 
     val dynamicRowFirstItemFRs = remember { mutableMapOf<Int, FocusRequester>() }
     fun getDynamicRowFirstItemFR(index: Int): FocusRequester = dynamicRowFirstItemFRs.getOrPut(index) { FocusRequester() }
@@ -342,165 +317,107 @@ fun HomeScreen(
                         )
                     }
 
-                    // Floating App Bar at Top
-                    Box(
+                    // Top App Bar: Responsive dynamic layout
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .statusBarsPadding()
-                            .padding(horizontal = 20.dp)
-                            .padding(top = 16.dp)
+                            .padding(horizontal = 16.dp)
+                            .padding(top = 14.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.align(Alignment.CenterStart),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        // Brand Logo Icon Only (Text label removed)
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(PrimaryNeon),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(PrimaryNeon),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayCircle,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Text(
-                                text = "MyStream",
-                                color = TextPrimary,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.ExtraBold
+                            Icon(
+                                imageVector = Icons.Default.PlayCircle,
+                                contentDescription = "MyStream",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
                             )
                         }
 
-                        // Wide Search Bar with type hint and direct embedded voice search
+                        // Dynamically resizing Search Bar (fits portrait mobile and landscape TV)
                         val searchInteraction = remember { MutableInteractionSource() }
                         val isSearchFocused by searchInteraction.collectIsFocusedAsState()
-                        val micInteraction = remember { MutableInteractionSource() }
-                        val isMicFocused by micInteraction.collectIsFocusedAsState()
 
                         Row(
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .widthIn(min = 280.dp, max = 450.dp)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(22.dp))
-                                .background(Color(0x6607090E))
-                                .border(
-                                    width = 1.dp,
-                                    color = Color(0x33FFFFFF),
-                                    shape = RoundedCornerShape(22.dp)
-                                )
-                                .padding(horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (isSearchFocused) FocusRingOrange.copy(alpha = 0.22f) else Color(0x6607090E))
+                                .border(
+                                    width = if (isSearchFocused) 2.dp else 1.dp,
+                                    color = if (isSearchFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                    shape = RoundedCornerShape(20.dp)
+                                )
+                                .focusRequester(searchFocusRequester)
+                                .focusable(interactionSource = searchInteraction)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type == KeyEventType.KeyDown) {
+                                        when (keyEvent.key) {
+                                            Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                                onNavigateToSearch()
+                                                true
+                                            }
+                                            else -> false
+                                        }
+                                    } else false
+                                }
+                                .clickable(interactionSource = searchInteraction, indication = null, onClick = onNavigateToSearch)
+                                .padding(horizontal = 12.dp)
                         ) {
-                            // Search Text Input Pill (Independently focusable via D-pad)
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(36.dp)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .background(if (isSearchFocused) FocusRingOrange.copy(alpha = 0.22f) else Color.Transparent)
-                                    .border(
-                                        width = if (isSearchFocused) 2.dp else 0.dp,
-                                        color = if (isSearchFocused) FocusRingOrange else Color.Transparent,
-                                        shape = RoundedCornerShape(18.dp)
-                                    )
-                                    .focusRequester(searchFocusRequester)
-                                    .focusable(interactionSource = searchInteraction)
-                                    .onPreviewKeyEvent { keyEvent ->
-                                        if (keyEvent.type == KeyEventType.KeyDown) {
-                                            when (keyEvent.key) {
-                                                Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                                                    onNavigateToSearch()
-                                                    true
-                                                }
-                                                else -> false
-                                            }
-                                        } else false
-                                    }
-                                    .clickable(interactionSource = searchInteraction, indication = null, onClick = onNavigateToSearch)
-                                    .padding(horizontal = 12.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "Search",
-                                    tint = if (isSearchFocused) FocusRingOrange else SecondaryCyan,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "Search movies, series, cast...",
-                                    color = if (isSearchFocused) TextPrimary else TextMuted,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            // Voice Mic Button (Independently focusable via D-pad)
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isMicFocused) FocusRingOrange else Color(0x22FFFFFF))
-                                    .border(
-                                        width = if (isMicFocused) 2.dp else 1.dp,
-                                        color = if (isMicFocused) FocusRingOrange else Color(0x22FFFFFF),
-                                        shape = CircleShape
-                                    )
-                                    .focusRequester(micFocusRequester)
-                                    .focusable(interactionSource = micInteraction)
-                                    .onPreviewKeyEvent { keyEvent ->
-                                        if (keyEvent.type == KeyEventType.KeyDown) {
-                                            when (keyEvent.key) {
-                                                Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                                                    launchVoiceSearch()
-                                                    true
-                                                }
-                                                else -> false
-                                            }
-                                        } else false
-                                    }
-                                    .clickable(interactionSource = micInteraction, indication = null) {
-                                        launchVoiceSearch()
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Mic,
-                                    contentDescription = "Voice Search",
-                                    tint = if (isMicFocused) Color.Black else SecondaryCyan,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = if (isSearchFocused) FocusRingOrange else SecondaryCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Search movies, series, cast...",
+                                color = if (isSearchFocused) TextPrimary else TextMuted,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
 
+                        // Right Action Buttons (Custom URL & Settings)
                         Row(
-                            modifier = Modifier.align(Alignment.CenterEnd),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            IconButton(onClick = { showCustomUrlDialog = true }) {
+                            IconButton(
+                                onClick = { showCustomUrlDialog = true },
+                                modifier = Modifier.size(36.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.AddLink,
                                     contentDescription = "Play Custom URL / Magnet",
-                                    tint = PrimaryNeon
+                                    tint = PrimaryNeon,
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
 
-                            IconButton(onClick = onNavigateToSources) {
+                            IconButton(
+                                onClick = onNavigateToSources,
+                                modifier = Modifier.size(36.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.Settings,
                                     contentDescription = "Settings & Providers",
-                                    tint = TextSecondary
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                         }
