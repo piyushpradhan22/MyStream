@@ -1,4 +1,4 @@
-# Proguard rules for MyStream
+# Proguard / R8 optimization rules for MyStream
 
 # Keep Annotations & Signatures
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
@@ -11,44 +11,22 @@
     kotlinx.serialization.KSerializer serializer();
 }
 
-# Libtorrent4j (JNI native SWIG interfaces - DO NOT OBFUSCATE OR STRIP)
--dontwarn org.libtorrent4j.**
--keep class org.libtorrent4j.** { *; }
--keepclassmembers class org.libtorrent4j.** { *; }
--keep class org.libtorrent4j.swig.** { *; }
--keepclassmembers class org.libtorrent4j.swig.** { *; }
+# Data models used with reflection / serialization
+-keep class com.mystream.app.data.model.** { *; }
+-keepclassmembers class com.mystream.app.data.model.** { *; }
 
-# PostgreSQL JDBC Driver (reflection and database connections)
--dontwarn org.postgresql.**
--dontwarn java.lang.management.**
--dontwarn javax.naming.**
--dontwarn javax.security.**
--dontwarn javax.sql.**
--dontwarn javax.transaction.**
--dontwarn javax.xml.**
--dontwarn org.ietf.jgss.**
--dontwarn org.osgi.**
--dontwarn waffle.**
--keep class org.postgresql.** { *; }
--keepclassmembers class org.postgresql.** { *; }
--keep class java.sql.** { *; }
--keep class javax.sql.** { *; }
-
-# NanoHTTPD (Local embedded streaming server)
--dontwarn fi.iki.elonen.**
--keep class fi.iki.elonen.** { *; }
--keepclassmembers class fi.iki.elonen.** { *; }
+# Chaquopy Python Bridge (called dynamically from Python)
+-dontwarn com.chaquo.python.**
+-keep class com.chaquo.python.** { *; }
+-keepclassmembers class com.chaquo.python.** { *; }
 
 # OkHttp & Okio
 -dontwarn okhttp3.**
 -dontwarn okio.**
 -keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
 
-# AndroidX Media3 / ExoPlayer
+# AndroidX Media3 / ExoPlayer (AAR provides consumer rules; keep necessary extractors)
 -dontwarn androidx.media3.**
--keep class androidx.media3.** { *; }
--keepclassmembers class androidx.media3.** { *; }
 
-# Coil Image Loader
+# Coil Image Loader (AAR provides consumer rules)
 -dontwarn coil3.**
--keep class coil3.** { *; }

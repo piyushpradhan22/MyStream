@@ -2,6 +2,7 @@ package com.mystream.app.data.api
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -101,23 +102,11 @@ class PikPakApiClient(
         }
     }
 
-    var cachedAccessToken: String? = null
-        private set
-    var cachedRefreshToken: String? = null
-        private set
-    var userId: String? = null
-        private set
-    var currentUsername: String? = null
-        private set
-    var loginTime: Double = 0.0
-        private set
-    var deviceId: String = UUID.randomUUID().toString().replace("-", "")
-
     private suspend fun captchaInit(
         action: String,
-        userId: String = this.userId ?: "",
+        userId: String = "",
         username: String = "",
-        deviceId: String = this.deviceId
+        deviceId: String = UUID.randomUUID().toString().replace("-", "")
     ): String? = withContext(Dispatchers.IO) {
         val url = "https://$PIKPAK_USER_HOST/v1/shield/captcha/init"
         val timestamp = System.currentTimeMillis().toString()
@@ -157,8 +146,7 @@ class PikPakApiClient(
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string() ?: return@withContext null
                 val root = json.parseToJsonElement(body).jsonObject
-                val token = root["captcha_token"]?.jsonPrimitive?.content
-                token
+                root["captcha_token"]?.jsonPrimitive?.content
             }
         } catch (e: Exception) {
             Log.w(TAG, "captchaInit error", e)
@@ -208,11 +196,6 @@ class PikPakApiClient(
                         deviceId = sessionDeviceId,
                         loginTime = System.currentTimeMillis() / 1000.0
                     )
-                    cachedAccessToken = session.accessToken
-                    cachedRefreshToken = session.refreshToken
-                    userId = session.userId
-                    currentUsername = session.username
-                    loginTime = session.loginTime
                     Log.i(TAG, "PikPak Login SUCCESSFUL for ${session.username}! User ID: ${session.userId}")
                     Result.success(session)
                 } else {
@@ -225,14 +208,6 @@ class PikPakApiClient(
             Log.e(TAG, "PikPak login network error", e)
             Result.failure(e)
         }
-    }
-
-    suspend fun addMagnetAndGetStreamUrl(
-        magnetUrl: String,
-        token: String = cachedAccessToken ?: ""
-    ): Result<String> = withContext(Dispatchers.IO) {
-        val res = addMagnetAndGetResolvedFile(magnetUrl, token)
-        res.map { it.streamUrl }
     }
 
     suspend fun addMagnetAndGetResolvedFile(
@@ -275,7 +250,6 @@ class PikPakApiClient(
         try {
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string() ?: throw IOException("Empty response from PikPak")
-                Log.w(TAG, "PikPak Add File HTTP ${response.code}: $body")
                 val rootJson = json.parseToJsonElement(body).jsonObject
 
                 if (!response.isSuccessful) {
@@ -295,51 +269,58 @@ class PikPakApiClient(
 
                 Log.d(TAG, "Offline Task Created - ID: $taskId, Phase: $phase, FileID: $fileId")
 
-                // If task is pending/running, poll for fast cloud cache completion (at most 3 attempts = 3.5s)
+                // If task is still running/saving, poll up to 12s for completion
                 if ((phase == "PHASE_TYPE_RUNNING" || phase == "PHASE_TYPE_PENDING" || fileId.isNullOrBlank()) && !taskId.isNullOrBlank()) {
-                    var pollAttempt = 0
-                    while (pollAttempt < 3) {
-                        kotlinx.coroutines.delay(1000)
-                        val taskListReq = Request.Builder()
-                            .url("https://$PIKPAK_API_HOST/drive/v1/tasks?type=offline&limit=20&filters=%7B%22phase%22%3A%7B%22in%22%3A%22PHASE_TYPE_RUNNING%2CPHASE_TYPE_COMPLETE%2CPHASE_TYPE_PENDING%22%7D%7D")
-                            .get()
-                            .header("Authorization", "Bearer ${session.accessToken}")
-                            .build()
+                    Log.d(TAG, "Waiting for PikPak task $taskId to finish saving...")
+                    val maxWaitSec = 12
+                    for (sec in 1..maxWaitSec) {
+                        delay(1000)
                         try {
-                            client.newCall(taskListReq).execute().use { tRes ->
-                                val tBody = tRes.body?.string()
-                                if (!tBody.isNullOrBlank()) {
-                                    val tRoot = json.parseToJsonElement(tBody).jsonObject
-                                    val tasks = tRoot["tasks"]?.jsonArray
-                                    if (tasks != null) {
-                                        for (item in tasks) {
-                                            val obj = item.jsonObject
-                                            if (obj["id"]?.jsonPrimitive?.content == taskId) {
-                                                phase = obj["phase"]?.jsonPrimitive?.content
-                                                val fid = obj["file_id"]?.jsonPrimitive?.content
-                                                if (!fid.isNullOrBlank()) fileId = fid
-                                                Log.d(TAG, "Task Poll [$pollAttempt]: phase=$phase, fileId=$fileId")
-                                                break
-                                            }
-                                        }
+                            val taskPollReq = Request.Builder()
+                                .url("https://$PIKPAK_API_HOST/drive/v1/tasks?type=offline")
+                                .get()
+                                .header("Authorization", "Bearer ${session.accessToken}")
+                                .header("User-Agent", "ANDROID-$PACKAGE_NAME/$CLIENT_VERSION")
+                                .header("X-Device-Id", session.deviceId)
+                                .build()
+
+                            client.newCall(taskPollReq).execute().use { pollResp ->
+                                val pollBody = pollResp.body?.string()
+                                if (!pollBody.isNullOrBlank()) {
+                                    val pollJson = json.parseToJsonElement(pollBody).jsonObject
+                                    val taskList = pollJson["tasks"]?.jsonArray?.mapNotNull { it.jsonObject } ?: emptyList()
+                                    val currentTask = taskList.firstOrNull { it["id"]?.jsonPrimitive?.content == taskId }
+                                    if (currentTask != null) {
+                                        phase = currentTask["phase"]?.jsonPrimitive?.content
+                                        val pollFileId = currentTask["file_id"]?.jsonPrimitive?.content
+                                        if (!pollFileId.isNullOrBlank()) fileId = pollFileId
+                                        if (phase == "PHASE_TYPE_COMPLETE") return@use
+                                    } else {
+                                        phase = "PHASE_TYPE_COMPLETE"
+                                        return@use
                                     }
                                 }
                             }
                         } catch (ignored: Exception) {}
-                        if (phase == "PHASE_TYPE_COMPLETE" && !fileId.isNullOrBlank()) {
-                            break
-                        }
-                        pollAttempt++
+
+                        if (phase == "PHASE_TYPE_COMPLETE" && !fileId.isNullOrBlank()) break
                     }
                 }
 
                 val finalFileId = fileId
                 if (!finalFileId.isNullOrBlank()) {
-                    val streamResult = getDirectStreamUrlForFile(finalFileId, session.accessToken, targetFileName)
+                    val streamResult = getDirectStreamUrlForFile(
+                        fileId = finalFileId,
+                        token = session.accessToken,
+                        targetFileName = targetFileName,
+                        deviceId = session.deviceId,
+                        userId = session.userId
+                    )
                     return@withContext streamResult.map { streamUrl ->
+                        val actualFileId = Regex("""[?&]fileid=([a-zA-Z0-9_-]+)""").find(streamUrl)?.groupValues?.get(1)?.takeIf { it.isNotBlank() } ?: finalFileId
                         PikPakResolvedFile(
-                            fileId = finalFileId,
-                            baseFileId = baseFileId,
+                            fileId = actualFileId,
+                            baseFileId = baseFileId.ifBlank { finalFileId },
                             streamUrl = streamUrl,
                             username = session.username,
                             accessToken = session.accessToken,
@@ -359,37 +340,27 @@ class PikPakApiClient(
         }
     }
 
-    suspend fun addMagnetAndGetResolvedFile(
-        magnetUrl: String,
-        token: String = cachedAccessToken ?: "",
-        targetFileName: String? = null
-    ): Result<PikPakResolvedFile> {
-        val session = PikPakAuthSession(
-            username = currentUsername.orEmpty(),
-            accessToken = token,
-            refreshToken = cachedRefreshToken.orEmpty(),
-            userId = userId.orEmpty(),
-            deviceId = deviceId,
-            loginTime = loginTime
-        )
-        return addMagnetAndGetResolvedFile(magnetUrl, session, targetFileName)
-    }
-
     suspend fun getDirectStreamUrlForFile(
         fileId: String,
-        token: String = cachedAccessToken ?: "",
-        targetFileName: String? = null
+        token: String,
+        targetFileName: String? = null,
+        deviceId: String = UUID.randomUUID().toString().replace("-", ""),
+        userId: String = ""
     ): Result<String> = withContext(Dispatchers.IO) {
         if (fileId.isBlank()) return@withContext Result.failure(IllegalArgumentException("File ID is blank"))
 
         try {
-            val req = Request.Builder()
-                .url("https://$PIKPAK_API_HOST/drive/v1/files/$fileId")
+            val captchaToken = captchaInit("GET:/drive/v1/files/$fileId", userId = userId, deviceId = deviceId)
+            val reqBuilder = Request.Builder()
+                .url("https://$PIKPAK_API_HOST/drive/v1/files/$fileId?usage=PLAY&with_play_info=true")
                 .get()
                 .header("Authorization", "Bearer $token")
                 .header("User-Agent", "ANDROID-$PACKAGE_NAME/$CLIENT_VERSION")
                 .header("X-Device-Id", deviceId)
-                .build()
+            if (!captchaToken.isNullOrBlank()) {
+                reqBuilder.header("X-Captcha-Token", captchaToken)
+            }
+            val req = reqBuilder.build()
 
             client.newCall(req).execute().use { response ->
                 val body = response.body?.string()
@@ -399,8 +370,20 @@ class PikPakApiClient(
 
                 val rootJson = json.parseToJsonElement(body).jsonObject
                 val kind = rootJson["kind"]?.jsonPrimitive?.content
+                val currentName = rootJson["name"]?.jsonPrimitive?.content.orEmpty().lowercase()
+                val currentSize = rootJson["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+                val parentId = rootJson["parent_id"]?.jsonPrimitive?.content.orEmpty()
 
-                // If this is a folder (multi-file torrent), list children and find the primary or episode video file
+                // If this file is a sample preview and sits inside a folder, redirect to parent folder to select the full movie!
+                if (kind == "drive#file" && (currentName.contains("sample") || currentName.startsWith("sample") || (currentSize in 1..80_000_000L)) && parentId.isNotBlank()) {
+                    Log.w(TAG, "⚠️ File $fileId is a sample preview ('$currentName', $currentSize bytes)! Redirecting to parent folder $parentId to select full movie...")
+                    return@withContext getDirectStreamUrlForFile(parentId, token, targetFileName, deviceId, userId)
+                }
+                if (currentName.contains("sample") || currentName.startsWith("sample")) {
+                    return@withContext Result.failure(IOException("Refusing to stream sample file '$currentName'"))
+                }
+
+                // If folder, list children and select target video file
                 if (kind == "drive#folder") {
                     try {
                         val listReq = Request.Builder()
@@ -416,21 +399,35 @@ class PikPakApiClient(
                             if (!listBody.isNullOrBlank()) {
                                 val listJson = json.parseToJsonElement(listBody).jsonObject
                                 val files = listJson["files"]?.jsonArray
-                                val videoFiles = files?.mapNotNull { it.jsonObject }?.filter { f ->
+                                val allVideos = files?.mapNotNull { it.jsonObject }?.filter { f ->
                                     val name = f["name"]?.jsonPrimitive?.content.orEmpty().lowercase()
                                     val fKind = f["kind"]?.jsonPrimitive?.content.orEmpty()
                                     fKind == "drive#file" && (name.endsWith(".mkv") || name.endsWith(".mp4") || name.endsWith(".avi") || name.endsWith(".mov") || name.endsWith(".ts"))
                                 } ?: emptyList()
+                                val nonSampleVideos = allVideos.filterNot { 
+                                    val n = it["name"]?.jsonPrimitive?.content.orEmpty().lowercase()
+                                    val s = it["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+                                    n.contains("sample") || n.startsWith("sample") || (s in 1..80_000_000L && allVideos.size > 1)
+                                }
+                                val videoFiles = if (nonSampleVideos.isNotEmpty()) nonSampleVideos else allVideos
 
                                 val target = if (!targetFileName.isNullOrBlank() && videoFiles.isNotEmpty()) {
-                                    val cleanTarget = targetFileName.lowercase().substringBefore("\n").trim()
+                                    val cleanTarget = targetFileName.lines().firstOrNull { it.isNotBlank() } ?: targetFileName
+                                    val targetTokens = cleanTarget.lowercase().replace(Regex("[^a-z0-9]"), " ").split("\\s+".toRegex()).filter { it.length > 2 }
+                                    
                                     videoFiles.firstOrNull { f ->
                                         val fn = f["name"]?.jsonPrimitive?.content.orEmpty().lowercase()
-                                        fn == cleanTarget || fn.contains(cleanTarget) || cleanTarget.contains(fn)
+                                        targetTokens.isNotEmpty() && targetTokens.all { token -> fn.contains(token) }
+                                    } ?: videoFiles.firstOrNull { f ->
+                                        val fn = f["name"]?.jsonPrimitive?.content.orEmpty().lowercase()
+                                        val fnClean = fn.replace(Regex("[^a-z0-9]"), " ")
+                                        val targetClean = cleanTarget.lowercase().replace(Regex("[^a-z0-9]"), " ")
+                                        fnClean.contains(targetClean) || targetClean.contains(fnClean)
                                     } ?: run {
-                                        val epPattern = Regex("""(?i)(?:s\d{1,2})?e(\d{1,3})|(\d{1,2})x(\d{1,3})|episode\s*(\d{1,3})""").find(cleanTarget)
-                                        if (epPattern != null) {
-                                            val epMatchStr = epPattern.value.lowercase()
+                                        val epPattern = Regex("""(?i)(?:s\d{1,2})?e(\d{1,3})|(\d{1,2})x(\d{1,3})|episode\s*(\d{1,3})""")
+                                        val match = epPattern.find(cleanTarget)
+                                        if (match != null) {
+                                            val epMatchStr = match.value.lowercase()
                                             videoFiles.firstOrNull { f ->
                                                 val fn = f["name"]?.jsonPrimitive?.content.orEmpty().lowercase()
                                                 fn.contains(epMatchStr)
@@ -449,80 +446,98 @@ class PikPakApiClient(
 
                                 val targetId = target?.get("id")?.jsonPrimitive?.content
                                 if (!targetId.isNullOrBlank() && targetId != fileId) {
-                                    return@withContext getDirectStreamUrlForFile(targetId, token, targetFileName)
+                                    return@withContext getDirectStreamUrlForFile(targetId, token, targetFileName, deviceId, userId)
                                 }
                             }
                         }
                     } catch (ignored: Exception) {}
                 }
 
-                fun extractMediaUrl(obj: kotlinx.serialization.json.JsonObject): String? {
-                    val medias = obj["medias"]?.jsonArray?.mapNotNull { it.jsonObject } ?: return null
-                    // Find the best quality stream that has a non-empty, valid URL
-                    // Prioritize 1080P/Original if present with URL, then 720P, then 480P
-                    val priorityCategories = listOf("category_origin", "original", "1080p", "1080", "720p", "720", "480p", "480")
-                    for (catKey in priorityCategories) {
-                        val match = medias.firstOrNull { m ->
-                            val cat = m["category"]?.jsonPrimitive?.content.orEmpty().lowercase()
-                            val name = m["media_name"]?.jsonPrimitive?.content.orEmpty().lowercase()
-                            (cat.contains(catKey) || name.contains(catKey)) && !m["link"]?.jsonObject?.get("url")?.jsonPrimitive?.content.isNullOrBlank()
-                        }
-                        val u = match?.get("link")?.jsonObject?.get("url")?.jsonPrimitive?.content
-                        if (!u.isNullOrBlank() && !u.contains("x_limited=1") && !u.contains("ms=102400")) {
-                            Log.i(TAG, "Selected streaming media: ${match["media_name"]?.jsonPrimitive?.content ?: match["category"]?.jsonPrimitive?.content}")
-                            return u
-                        }
+                // Collect all candidates: original torrent file (web_content_link) and medias
+                val candidates = mutableListOf<String>()
+
+                val webLink = rootJson["web_content_link"]?.jsonPrimitive?.content
+                if (!webLink.isNullOrBlank() && !webLink.contains("x_limited=1") && !webLink.contains("ms=102400")) {
+                    candidates.add(webLink)
+                }
+
+                val medias = rootJson["medias"]?.jsonArray?.mapNotNull { it.jsonObject } ?: emptyList()
+                val priorityCategories = listOf("1080", "720", "480", "category_origin", "original")
+                for (catKey in priorityCategories) {
+                    val match = medias.firstOrNull { m ->
+                        val cat = m["category"]?.jsonPrimitive?.content.orEmpty().lowercase()
+                        val name = m["media_name"]?.jsonPrimitive?.content.orEmpty().lowercase()
+                        val url = m["link"]?.jsonObject?.get("url")?.jsonPrimitive?.content
+                        (cat.contains(catKey) || name.contains(catKey)) && !url.isNullOrBlank() && !url.contains("x_limited=1") && !url.contains("ms=102400")
                     }
-
-                    // Fallback to any media object with a non-empty valid URL
-                    for (m in medias) {
-                        val u = m["link"]?.jsonObject?.get("url")?.jsonPrimitive?.content
-                        if (!u.isNullOrBlank() && !u.contains("x_limited=1") && !u.contains("ms=102400")) {
-                            return u
-                        }
+                    val url = match?.get("link")?.jsonObject?.get("url")?.jsonPrimitive?.content
+                    if (!url.isNullOrBlank() && !candidates.contains(url)) {
+                        candidates.add(url)
                     }
-                    return null
+                }
+                for (m in medias) {
+                    val url = m["link"]?.jsonObject?.get("url")?.jsonPrimitive?.content
+                    if (!url.isNullOrBlank() && !url.contains("x_limited=1") && !url.contains("ms=102400") && !candidates.contains(url)) {
+                        candidates.add(url)
+                    }
                 }
 
-                val initialMediaUrl = extractMediaUrl(rootJson)
-                if (!initialMediaUrl.isNullOrBlank()) {
-                    Log.i(TAG, "🎉 EXTRACTED HIGH-SPEED DIRECT STREAM URL: ${initialMediaUrl.take(70)}...")
-                    return@withContext Result.success(initialMediaUrl)
+                // Prioritize candidate that is NOT in cold archive (Standard storage -> plays instantly)
+                var selectedUrl: String? = null
+                for (cand in candidates) {
+                    val isArchive = checkStreamArchiveStatus(cand)
+                    if (!isArchive) {
+                        selectedUrl = cand
+                        Log.i(TAG, "⚡ Selected INSTANT active stream (non-archive) for ${rootJson["name"]?.jsonPrimitive?.content ?: fileId}")
+                        break
+                    }
                 }
 
-                // If high-speed media stream is still generating in cloud storage, poll file details
-                var attempts = 0
-                while (attempts < 8) {
-                    kotlinx.coroutines.delay(1500)
-                    val refetchReq = Request.Builder()
-                        .url("https://$PIKPAK_API_HOST/drive/v1/files/$fileId")
-                        .get()
-                        .header("Authorization", "Bearer $token")
-                        .header("User-Agent", "ANDROID-$PACKAGE_NAME/$CLIENT_VERSION")
-                        .header("X-Device-Id", deviceId)
-                        .build()
-                    try {
-                        client.newCall(refetchReq).execute().use { r ->
-                            val b = r.body?.string()
-                            if (!b.isNullOrBlank()) {
-                                val pollRoot = json.parseToJsonElement(b).jsonObject
-                                val m = extractMediaUrl(pollRoot)
-                                if (!m.isNullOrBlank()) {
-                                    Log.i(TAG, "🎉 Recovered High-Speed URL on poll [$attempts]: ${m.take(70)}...")
-                                    return@withContext Result.success(m)
-                                }
-                            }
-                        }
-                    } catch (_: Exception) {}
-                    attempts++
+                // If all candidates are in Archive, fallback to highest quality to initiate cloud unfreeze
+                if (selectedUrl == null && candidates.isNotEmpty()) {
+                    selectedUrl = candidates.first()
+                    Log.i(TAG, "❄️ All stream candidates are cold Archive for ${rootJson["name"]?.jsonPrimitive?.content ?: fileId}")
                 }
 
-                // Do NOT fallback to web_content_link as it is a throttled zip/browser download link
-                Result.failure(IOException("No unthrottled medias stream available for file $fileId"))
+                if (!selectedUrl.isNullOrBlank()) {
+                    return@withContext Result.success(selectedUrl)
+                }
+
+                Result.failure(IOException("No playable stream URL found for file $fileId"))
             }
         } catch (e: Exception) {
             Log.e(TAG, "getDirectStreamUrlForFile error", e)
             Result.failure(e)
         }
     }
+
+    suspend fun checkStreamArchiveStatus(url: String): Boolean = withContext(Dispatchers.IO) {
+        if (url.isBlank()) return@withContext false
+        try {
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "ANDROID-$PACKAGE_NAME/$CLIENT_VERSION")
+                .header("Range", "bytes=0-0")
+                .get()
+                .build()
+            client.newCall(req).execute().use { res ->
+                val ossStorage = res.header("x-oss-storage-class") ?: res.header("X-Oss-Storage-Class")
+                val cosStorage = res.header("x-cos-storage-class") ?: res.header("X-Cos-Storage-Class")
+                val xosErr = res.header("x-xos-err-desc") ?: res.header("X-Xos-Err-Desc")
+                val hasArchiveClass = (ossStorage?.contains("Archive", ignoreCase = true) == true) ||
+                        (cosStorage?.contains("ARCHIVE", ignoreCase = true) == true)
+                val isRestored = xosErr == "0"
+                val isArchive = (hasArchiveClass && !isRestored) || (xosErr != null && xosErr != "0" && xosErr.isNotBlank())
+                if (isArchive) {
+                    Log.i(TAG, "❄️ Probe detected Archive storage class (oss=$ossStorage, cos=$cosStorage, xosErr=$xosErr) for stream")
+                } else if (hasArchiveClass && isRestored) {
+                    Log.i(TAG, "☀️ Probe detected Archive object is RESTORED/ACTIVE (xosErr=0) for stream")
+                }
+                isArchive
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
 }
+

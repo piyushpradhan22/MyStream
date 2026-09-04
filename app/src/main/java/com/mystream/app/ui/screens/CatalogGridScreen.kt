@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import com.mystream.app.ui.utils.appTopBarPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -160,9 +161,8 @@ fun CatalogGridScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
+                .appTopBarPadding(additionalTop = 10.dp)
                 .padding(horizontal = 16.dp)
-                .padding(top = 16.dp)
         ) {
             // Header Bar
             Row(

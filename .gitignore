@@ -30,6 +30,13 @@ proguard/
 # Log Files
 *.log
 device_logs.txt
+.arc-debug/
+.env
+scripts/
+*.py
+!app/src/main/python/**/*.py
+*.md
+!README.md
 
 # Android Studio Navigation editor temp files
 .navigation/

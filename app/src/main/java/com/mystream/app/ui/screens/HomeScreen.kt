@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import com.mystream.app.ui.utils.appTopBarPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -50,10 +51,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,9 +104,6 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.runtime.mutableIntStateOf
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -143,6 +147,8 @@ fun HomeScreen(
     var comedySeries by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
 
     var featuredItem by remember { mutableStateOf<StremioMetaPreview?>(null) }
+    var featuredPool by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
+    var featuredIndex by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
     var reloadTrigger by remember { mutableIntStateOf(0) }
     var loadError by remember { mutableStateOf<String?>(null) }
@@ -172,7 +178,11 @@ fun HomeScreen(
     if (showExitConfirmationDialog) {
         ExitConfirmationDialog(
             onConfirmExit = {
-                (context as? Activity)?.finishAffinity()
+                (context as? Activity)?.let { act ->
+                    act.finishAffinity()
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                    kotlin.system.exitProcess(0)
+                }
             },
             onDismiss = {
                 showExitConfirmationDialog = false
@@ -196,7 +206,9 @@ fun HomeScreen(
     }
 
     LaunchedEffect(reloadTrigger) {
-        isLoading = true
+        if (topMovies.isEmpty() && indianCategories.isEmpty()) {
+            isLoading = true
+        }
         loadError = null
         try {
             coroutineScope {
@@ -261,6 +273,24 @@ fun HomeScreen(
                     }
                 }
             }
+
+            // Build randomized pool of featured cards once at boot and keep fixed throughout the session
+            val existingBootPool = repository.bootFeaturedPool
+            if (!existingBootPool.isNullOrEmpty()) {
+                featuredPool = existingBootPool
+                featuredItem = existingBootPool.firstOrNull()
+            } else {
+                val allMetas = (indianCategories.flatMap { it.second } + topMovies + topSeries + actionMovies + scifiMovies)
+                    .filter { !it.background.isNullOrBlank() || !it.poster.isNullOrBlank() }
+                    .distinctBy { it.id }
+                    .shuffled()
+
+                if (allMetas.isNotEmpty()) {
+                    repository.bootFeaturedPool = allMetas
+                    featuredPool = allMetas
+                    featuredItem = allMetas.first()
+                }
+            }
         } finally {
             isLoading = false
         }
@@ -310,6 +340,20 @@ fun HomeScreen(
                                     }
                                 } catch (_: Exception) {}
                             },
+                            onNavigateLeft = {
+                                if (featuredPool.size > 1) {
+                                    featuredIndex = (featuredIndex - 1 + featuredPool.size) % featuredPool.size
+                                    featuredItem = featuredPool[featuredIndex]
+                                }
+                            },
+                            onNavigateRight = {
+                                if (featuredPool.size > 1) {
+                                    featuredIndex = (featuredIndex + 1) % featuredPool.size
+                                    featuredItem = featuredPool[featuredIndex]
+                                }
+                            },
+                            itemCount = featuredPool.size,
+                            currentIndex = featuredIndex,
                             onPlayClick = {
                                 onNavigateToDetail(hero.type, hero.id)
                             },
@@ -321,9 +365,9 @@ fun HomeScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .statusBarsPadding()
+                            .appTopBarPadding(additionalTop = 10.dp)
                             .padding(horizontal = 16.dp)
-                            .padding(top = 14.dp, bottom = 4.dp),
+                            .padding(bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {

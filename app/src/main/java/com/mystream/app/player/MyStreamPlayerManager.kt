@@ -86,6 +86,13 @@ class MyStreamPlayerManager(
         setMediaCodecSelector(MediaCodecSelector.DEFAULT)
     }
 
+    private var isCurrentStreamArchive = false
+    private var hasTriggeredThaw = false
+    private val _isArchiveActivating = MutableStateFlow(false)
+    val isArchiveActivating: StateFlow<Boolean> = _isArchiveActivating.asStateFlow()
+    private val _archiveRetryCount = MutableStateFlow(0)
+    val archiveRetryCount: StateFlow<Int> = _archiveRetryCount.asStateFlow()
+
     private val playerOkHttpClient = OkHttpClient.Builder()
         .dns(com.mystream.app.data.api.SystemFallbackDns)
         .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
@@ -98,12 +105,46 @@ class MyStreamPlayerManager(
         .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
         .addNetworkInterceptor { chain ->
             val req = chain.request()
-            Log.d(TAG, "Stream HTTP -> ${req.method} ${req.url}")
+            Log.d(TAG, "Stream HTTP -> ${req.method} ${req.url} (range=${req.header("Range")})")
             try {
                 val res = chain.proceed(req)
-                Log.i(TAG, "Stream HTTP <- ${res.code} (len=${res.header("Content-Length")}, range=${res.header("Content-Range")}, type=${res.header("Content-Type")})")
+                val xosErr = res.header("x-xos-err-desc") ?: res.header("X-Xos-Err-Desc")
+                val ossStorage = res.header("x-oss-storage-class") ?: res.header("X-Oss-Storage-Class")
+                val cosStorage = res.header("x-cos-storage-class") ?: res.header("X-Cos-Storage-Class")
+                val isStorageArchive = (ossStorage?.contains("Archive", ignoreCase = true) == true) ||
+                        (cosStorage?.contains("ARCHIVE", ignoreCase = true) == true)
+                if (isStorageArchive) {
+                    isCurrentStreamArchive = true
+                    if (!hasTriggeredThaw) {
+                        hasTriggeredThaw = true
+                        sourcesRepository?.let { repo ->
+                            CoroutineScope(Dispatchers.IO).launch {
+                                try {
+                                    Log.i(TAG, "Triggering PikPak control plane thaw for archive stream: ${req.url}")
+                                    repo.pikpakResolver.triggerArchiveThawForUrl(req.url.toString())
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Failed to trigger control plane thaw: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                }
+                val isFrozen = (xosErr == "5") || (isStorageArchive && xosErr != "0")
+
+                Log.i(TAG, "Stream HTTP <- ${res.code} (len=${res.header("Content-Length")}, range=${res.header("Content-Range")}, xosErr=${xosErr}, storage=${ossStorage ?: cosStorage}, type=${res.header("Content-Type")})")
+                if (isFrozen) {
+                    _isArchiveActivating.value = true
+                    _isBuffering.value = true
+                } else if (res.isSuccessful && !isCurrentStreamArchive && (xosErr == "0" || (!isStorageArchive && xosErr == null))) {
+                    _isArchiveActivating.value = false
+                }
                 res
             } catch (e: Exception) {
+                val msg = e.message.orEmpty().lowercase()
+                if (msg.contains("unexpected end of stream") || msg.contains("protocol") || msg.contains("broken pipe")) {
+                    _isArchiveActivating.value = true
+                    _isBuffering.value = true
+                }
                 Log.e(TAG, "Stream HTTP FAIL -> ${e.message} for ${req.url}", e)
                 throw e
             }
@@ -123,32 +164,82 @@ class MyStreamPlayerManager(
         override fun onTransferEnd(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
     }
 
-    private val httpDataSourceFactory = OkHttpDataSource.Factory(playerOkHttpClient)
+    private val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(playerOkHttpClient)
         .setUserAgent("ANDROID-com.pikcloud.pikpak/1.47.1")
         .setTransferListener(speedTransferListener)
 
+    private val extractorsFactory = androidx.media3.extractor.DefaultExtractorsFactory().apply {
+        setConstantBitrateSeekingEnabled(true)
+        setTsExtractorFlags(
+            androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or
+            androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS
+        )
+        setTsExtractorTimestampSearchBytes(188 * 1024)
+    }
+
     private val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
 
-    private val mediaSourceFactory = DefaultMediaSourceFactory(context)
+    private val mediaSourceFactory = DefaultMediaSourceFactory(context, extractorsFactory)
         .setDataSourceFactory(dataSourceFactory)
         .setLoadErrorHandlingPolicy(object : DefaultLoadErrorHandlingPolicy() {
             override fun getMinimumLoadableRetryCount(dataType: Int): Int {
-                return 12
+                if (isCurrentStreamArchive || _isArchiveActivating.value) return 180
+                return 8
             }
 
             override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+                val ex = loadErrorInfo.exception
+                val isNetworkDrop = ex is java.net.ProtocolException || 
+                                    ex is java.net.SocketException ||
+                                    ex is java.net.SocketTimeoutException ||
+                                    ex is androidx.media3.datasource.HttpDataSource.HttpDataSourceException
+                
+                if (isCurrentStreamArchive || _isArchiveActivating.value) {
+                    _isArchiveActivating.value = true
+                    _isBuffering.value = true
+                    val count = loadErrorInfo.errorCount
+                    _archiveRetryCount.value = count
+                    if (count <= 180) {
+                        val delayMs = when {
+                            count <= 20 -> 2500L
+                            count <= 60 -> 3000L
+                            else -> 4000L
+                        }
+                        Log.w(TAG, "Archive stream thawing retry #$count/180 (delay=${delayMs}ms): ${ex.message}")
+                        return delayMs
+                    }
+                    return C.TIME_UNSET
+                }
+                
+                if (isNetworkDrop && loadErrorInfo.errorCount <= 8) {
+                    Log.w(TAG, "Network stream retry #${loadErrorInfo.errorCount}/8 (delay=1500ms): ${ex.message}")
+                    return 1500L
+                }
+                
                 val base = super.getRetryDelayMsFor(loadErrorInfo)
                 return when {
                     base == C.TIME_UNSET -> 1000L
-                    else -> base.coerceIn(500L, 5000L)
+                    else -> base.coerceIn(500L, 3000L)
                 }
             }
         })
+
+    private val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+        .setBufferDurationsMs(
+            /* minBufferMs = */ 15_000,
+            /* maxBufferMs = */ 30_000,
+            /* bufferForPlaybackMs = */ 2_000,
+            /* bufferForPlaybackAfterRebufferMs = */ 3_000
+        )
+        .setTargetBufferBytes(25 * 1024 * 1024) // 25MB max buffer memory footprint
+        .setPrioritizeTimeOverSizeThresholds(true)
+        .build()
 
     val player: ExoPlayer = ExoPlayer.Builder(context, renderersFactory)
         .setTrackSelector(trackSelector)
         .setMediaSourceFactory(mediaSourceFactory)
         .setBandwidthMeter(bandwidthMeter)
+        .setLoadControl(loadControl)
         .setAudioAttributes(
             androidx.media3.common.AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -207,6 +298,7 @@ class MyStreamPlayerManager(
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private var tickerJob: Job? = null
+    private var streamDurationFallbackMs = 0L
 
     private val becomingNoisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -220,12 +312,8 @@ class MyStreamPlayerManager(
         setupPlayerListeners()
         try {
             val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(becomingNoisyReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                context.registerReceiver(becomingNoisyReceiver, filter)
-            }
-        } catch (e: Exception) {
+            context.registerReceiver(becomingNoisyReceiver, filter)
+        } catch (_: Exception) {
             // ignore if register fails
         }
         startProgressTicker()
@@ -233,6 +321,15 @@ class MyStreamPlayerManager(
 
     private fun setupPlayerListeners() {
         player.addListener(object : Player.Listener {
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                val dur = player.duration
+                if (dur > 0L && dur != C.TIME_UNSET) {
+                    _duration.value = dur
+                } else if (streamDurationFallbackMs > 0L) {
+                    _duration.value = streamDurationFallbackMs
+                }
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _isPlaying.value = isPlaying
                 Log.d(TAG, "onIsPlayingChanged: $isPlaying")
@@ -241,18 +338,37 @@ class MyStreamPlayerManager(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 _isBuffering.value = (playbackState == Player.STATE_BUFFERING)
                 Log.d(TAG, "onPlaybackStateChanged: $playbackState (Buffering=${_isBuffering.value})")
+                if (playbackState == Player.STATE_BUFFERING && isCurrentStreamArchive) {
+                    _isArchiveActivating.value = true
+                }
                 if (playbackState == Player.STATE_READY) {
-                    _duration.value = player.duration.coerceAtLeast(0L)
+                    val dur = player.duration
+                    if (dur > 0L && dur != C.TIME_UNSET) {
+                        _duration.value = dur
+                    } else if (streamDurationFallbackMs > 0L) {
+                        _duration.value = streamDurationFallbackMs
+                    }
+                    _duration.value = _duration.value.coerceAtLeast(0L)
                     _isBuffering.value = false
                     _errorMessage.value = null
-                    Log.i(TAG, "Player is READY, duration=${player.duration}ms")
+                    _isArchiveActivating.value = false
+                    _archiveRetryCount.value = 0
+                    Log.i(TAG, "Player is READY, exoDuration=${player.duration}ms, effectiveDuration=${_duration.value}ms")
                 }
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "Player error occurred: ${error.message}", error)
+                _isPlaying.value = false
                 _isBuffering.value = false
-                _errorMessage.value = error.message ?: "Playback error"
+                val isArchiveFail = isCurrentStreamArchive || _isArchiveActivating.value
+                _isArchiveActivating.value = false
+                val msg = if (isArchiveFail || error.message?.contains("unexpected end of stream", ignoreCase = true) == true) {
+                    "Cold storage archive is thawing on cloud servers (~1-2 mins). Please wait or select another stream."
+                } else {
+                    error.message ?: "Playback error. Please try another stream."
+                }
+                _errorMessage.value = msg
             }
 
             override fun onTracksChanged(tracks: Tracks) {
@@ -293,7 +409,15 @@ class MyStreamPlayerManager(
             while (isActive) {
                 if (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING) {
                     _currentPosition.value = player.currentPosition.coerceAtLeast(0L)
-                    _duration.value = player.duration.coerceAtLeast(0L)
+                    val exoDur = player.duration
+                    val effectiveDur = if (exoDur > 0L && exoDur != C.TIME_UNSET) {
+                        exoDur
+                    } else if (streamDurationFallbackMs > 0L) {
+                        streamDurationFallbackMs
+                    } else {
+                        0L
+                    }
+                    _duration.value = effectiveDur
                     _bufferedPosition.value = player.bufferedPosition.coerceAtLeast(0L)
                     _bufferPercentage.value = player.bufferedPercentage
 
@@ -328,14 +452,48 @@ class MyStreamPlayerManager(
         saveCurrentProgress()
         _currentItem.value = item
         _isBuffering.value = true
+        hasTriggeredThaw = false
+        val isItemArchive = item.subtitle?.contains("ARC", ignoreCase = true) == true ||
+                item.title.contains("ARC", ignoreCase = true) ||
+                item.mediaUrl.contains("storage=Archive", ignoreCase = true)
+        isCurrentStreamArchive = isItemArchive
+        _isArchiveActivating.value = isItemArchive
+        _archiveRetryCount.value = 0
         _errorMessage.value = null
+        if (isItemArchive) {
+            hasTriggeredThaw = true
+            sourcesRepository?.let { repo ->
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        Log.i(TAG, "Pre-triggering PikPak control plane thaw for ${item.title}")
+                        repo.pikpakResolver.triggerArchiveThawForUrl(item.mediaUrl)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Pre-trigger thaw error: ${e.message}")
+                    }
+                }
+            }
+        }
         val actualStartPos = startPositionMs ?: item.startPositionMs
-        Log.i(TAG, "Playing media (start at ${actualStartPos}ms): ${item.title} -> ${item.mediaUrl}")
+
+        val urlDuration = Regex("""[?&](?:ms|th)=(\d+)""").find(item.mediaUrl)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        streamDurationFallbackMs = if (urlDuration > 0L) urlDuration else 0L
+        if (streamDurationFallbackMs > 0L) {
+            _duration.value = streamDurationFallbackMs
+        }
+        Log.i(TAG, "Playing media (start at ${actualStartPos}ms, urlDuration=${streamDurationFallbackMs}ms): ${item.title} -> ${item.mediaUrl}")
 
         val reqProps = mutableMapOf<String, String>()
         reqProps["User-Agent"] = "ANDROID-com.pikcloud.pikpak/1.47.1"
-        item.headers?.forEach { (k, v) -> reqProps[k] = v }
+        if (item.mediaUrl.contains("mypikpak.com/download/", ignoreCase = true)) {
+            reqProps["Accept-Encoding"] = "identity"
+        }
+        item.headers?.forEach { (k, v) -> 
+            if (!k.equals("Range", ignoreCase = true)) {
+                reqProps[k] = v
+            }
+        }
         httpDataSourceFactory.setDefaultRequestProperties(reqProps)
+        Log.d(TAG, "Stream request props: acceptEncoding=${reqProps["Accept-Encoding"] ?: "default"}")
 
         val uri = Uri.parse(item.mediaUrl)
 
@@ -346,11 +504,20 @@ class MyStreamPlayerManager(
             .setArtworkUri(item.posterUrl?.let { Uri.parse(it) } ?: item.backdropUrl?.let { Uri.parse(it) })
             .build()
 
-        val mediaItem = MediaItem.Builder()
+        val mediaItemBuilder = MediaItem.Builder()
             .setUri(uri)
             .setMediaId(item.id)
             .setMediaMetadata(metadata)
-            .build()
+
+        val titleLower = item.title.lowercase()
+        val urlLower = item.mediaUrl.lowercase()
+        if (titleLower.contains(".mp4") || urlLower.contains(".mp4")) {
+            mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.VIDEO_MP4)
+        } else if (titleLower.contains(".mkv") || urlLower.contains(".mkv")) {
+            mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.VIDEO_MATROSKA)
+        }
+
+        val mediaItem = mediaItemBuilder.build()
 
         player.setMediaItem(mediaItem, actualStartPos)
         player.prepare()
@@ -372,19 +539,21 @@ class MyStreamPlayerManager(
 
     fun seekTo(positionMs: Long) {
         val requested = positionMs.coerceAtLeast(0L)
-        val durationCap = player.duration.coerceAtLeast(0L)
+        val durationCap = if (_duration.value > 0L) _duration.value else (player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: Long.MAX_VALUE)
         val target = if (durationCap > 0L) requested.coerceIn(0L, durationCap) else requested
-        Log.i(TAG, "Seeking to ${target}ms (duration=${durationCap}ms)")
+        Log.i(TAG, "Seeking to ${target}ms (duration=${_duration.value}ms)")
         player.seekTo(target)
     }
 
     fun seekForward(seconds: Long = 10) {
-        val newPos = player.currentPosition + (seconds * 1000)
+        val current = if (_currentPosition.value > 0L) _currentPosition.value else player.currentPosition
+        val newPos = current + (seconds * 1000)
         seekTo(newPos)
     }
 
     fun seekBack(seconds: Long = 10) {
-        val newPos = player.currentPosition - (seconds * 1000)
+        val current = if (_currentPosition.value > 0L) _currentPosition.value else player.currentPosition
+        val newPos = (current - (seconds * 1000)).coerceAtLeast(0L)
         seekTo(newPos)
     }
 

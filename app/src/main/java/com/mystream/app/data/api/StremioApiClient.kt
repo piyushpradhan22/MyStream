@@ -47,14 +47,24 @@ object SystemFallbackDns : Dns {
 }
 
 class StremioApiClient(
+    cacheDir: java.io.File? = null
+) {
     private val client: OkHttpClient = OkHttpClient.Builder()
         .dns(SystemFallbackDns)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
+        .apply {
+            if (cacheDir != null) {
+                try {
+                    val httpCache = okhttp3.Cache(java.io.File(cacheDir, "stremio_http_cache"), 60L * 1024 * 1024)
+                    cache(httpCache)
+                } catch (_: Exception) {}
+            }
+        }
         .build()
-) {
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -62,7 +72,15 @@ class StremioApiClient(
         encodeDefaults = true
     }
 
+    private val inMemoryResponseCache = object : java.util.LinkedHashMap<String, String>(100, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 100
+    }
+
     private suspend fun getRaw(url: String, customHeaders: Map<String, String>? = null): String = withContext(Dispatchers.IO) {
+        synchronized(inMemoryResponseCache) {
+            inMemoryResponseCache[url]?.let { return@withContext it }
+        }
+
         android.util.Log.d("StremioApiClient", "Fetching URL: $url")
         val requestBuilder = Request.Builder()
             .url(url)
@@ -81,6 +99,9 @@ class StremioApiClient(
                 }
                 val body = response.body?.string() ?: throw IOException("Empty response body for URL: $url")
                 android.util.Log.d("StremioApiClient", "Successfully fetched ${body.length} chars from $url")
+                synchronized(inMemoryResponseCache) {
+                    inMemoryResponseCache[url] = body
+                }
                 body
             }
         } catch (e: Exception) {

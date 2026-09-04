@@ -3,6 +3,9 @@ package com.mystream.app.data.resolver
 import android.content.Context
 import android.util.Log
 import com.mystream.app.data.api.PikPakApiClient
+import com.mystream.app.data.api.PikPakAuthSession
+import com.mystream.app.data.api.PikPakPythonBridge
+import com.mystream.app.data.api.PikPakResolvedFile
 import com.mystream.app.data.api.StremioApiClient
 import com.mystream.app.data.db.PikPakTorrentRecord
 import com.mystream.app.data.db.PikPakV2Record
@@ -37,9 +40,12 @@ import javax.crypto.spec.GCMParameterSpec
 
 class PikPakStreamResolver(
     private val context: Context,
-    private val pikpakClient: PikPakApiClient = PikPakApiClient(),
+    val pikpakClient: PikPakApiClient = PikPakApiClient(),
     private val stremioClient: StremioApiClient = StremioApiClient()
 ) {
+    suspend fun checkStreamArchiveStatus(url: String): Boolean = pikpakClient.checkStreamArchiveStatus(url)
+    val pythonBridge by lazy { PikPakPythonBridge(context) }
+    private val lastThawTrigger = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true; prettyPrint = true }
     private val encConfigFile: File get() = File(context.filesDir, "mystream_config.enc")
     private val legacyConfigFile: File get() = File(context.filesDir, "mystream_config.json")
@@ -314,28 +320,32 @@ class PikPakStreamResolver(
         // 2. Check and reuse cached records in pikpak_v2 for this exact ID
         if (!forceRefresh && postgresUrl.isNotBlank() && dataV2.isNotEmpty()) {
             val validCachedRecords = dataV2.filter { rec ->
-                rec.infoHash.isBlank() || currentInfoHashes.contains(rec.infoHash)
+                val notSample = !rec.title.contains("sample", ignoreCase = true) &&
+                        !rec.filename.contains("sample", ignoreCase = true) &&
+                        !(rec.size.contains("MB", ignoreCase = true) && (rec.size.replace("MB", "", ignoreCase = true).trim().toDoubleOrNull() ?: 0.0) < 100.0)
+                notSample && (rec.infoHash.isBlank() || currentInfoHashes.contains(rec.infoHash))
             }
 
             if (validCachedRecords.isNotEmpty()) {
-                Log.i(TAG, "⚡ Checking ${validCachedRecords.size} cached DB records for exact ID...")
+                Log.i(TAG, "⚡ Checking ${validCachedRecords.size} cached DB records for exact ID in parallel...")
                 val cachedJobs = validCachedRecords.map { record ->
                     launch(Dispatchers.IO) {
-                        var token = record.accessToken
-                        val now = System.currentTimeMillis() / 1000.0
-                        if ((now - record.loginTime) > 7000.0 || token.isBlank()) {
-                            val loginRes = pikpakClient.login(record.username, sharedPass)
-                            if (loginRes.isSuccess) {
-                                token = pikpakClient.cachedAccessToken.orEmpty()
-                            }
-                        }
-                        val urlRes = pikpakClient.getDirectStreamUrlForFile(record.fileId, token)
+                        val urlRes = pythonBridge.resolveStreamWithPython(
+                            username = record.username,
+                            password = sharedPass,
+                            magnet = if (record.infoHash.isNotBlank()) "magnet:?xt=urn:btih:${record.infoHash}" else "",
+                            fileId = record.fileId,
+                            fileName = record.title.ifBlank { record.filename }
+                        )
                         val freshUrl = urlRes.getOrNull()
                         val isThrottled = freshUrl?.contains("x_limited=1") == true || freshUrl?.contains("ms=102400") == true
                         if (freshUrl != null && !isThrottled) {
+                            val isArchive = pikpakClient.checkStreamArchiveStatus(freshUrl)
                             val isDownscaled = (record.quality.contains("1080", ignoreCase = true) || record.quality.contains("4k", ignoreCase = true) || record.quality.contains("2160", ignoreCase = true)) &&
                                     (freshUrl.contains("category=transcoded", ignoreCase = true) || freshUrl.contains("category=transcode", ignoreCase = true))
-                            val qName = if (isDownscaled) "📽️ ${record.quality} ⬇" else "📽️ ${record.quality}"
+                            val downTag = if (isDownscaled) " ⬇" else ""
+                            val arcTag = if (isArchive) " ARC" else ""
+                            val qName = "📽️ ${record.quality}$downTag$arcTag"
                             val s = StremioStreamSource(
                                 name = qName,
                                 title = record.title,
@@ -347,7 +357,7 @@ class PikPakStreamResolver(
                                 accumulatedStreams.add(s)
                                 resolvedQualities.add(record.quality)
                                 send(accumulatedStreams.toList())
-                                Log.i(TAG, "⚡ Emitted valid cached stream: ${s.name}")
+                                Log.i(TAG, "⚡ Emitted cached stream: ${s.name} | Account: ${record.username} | UserID: ${record.userId} | FileID: ${record.fileId}")
                             }
                         } else {
                             Log.w(TAG, "⚠️ Cached DB record for ${record.quality} was throttled or invalid, re-resolving...")
@@ -397,7 +407,6 @@ class PikPakStreamResolver(
         // 6. Launch ALL remaining quality tier workers concurrently and EMIT 1-BY-1 INSTANTLY!
         val workers = torrentsByQuality.mapIndexed { workerIndex, (quality, candidates) ->
             launch(Dispatchers.IO) {
-                // Assign dedicated accounts for each quality tier worker so they don't overfill the same account!
                 val accountSlice = if (accounts.size > workerIndex * 3) {
                     accounts.drop(workerIndex * 3) + accounts.take(workerIndex * 3)
                 } else {
@@ -409,20 +418,18 @@ class PikPakStreamResolver(
                 // Prioritize Hindi audio candidates first within quality tier!
                 val sortedCandidates = candidates.sortedWith(compareByDescending<StremioStreamSource> { it.hasHindiAudio })
 
-                for (torr in sortedCandidates.take(5)) {
+                for (torr in sortedCandidates.take(2)) {
                     if (qualityResolved) break
                     val infoHash = torr.infoHash ?: continue
                     val magnet = "magnet:?xt=urn:btih:$infoHash"
-                    val qualityName = "📽️ $quality"
                     val titleClean = torr.title?.lines()?.firstOrNull() ?: torr.name ?: "Stream"
 
-                    // If this infoHash exists in DB on an account, reuse that SAME account first!
                     val knownRecord = accountByInfoHash[infoHash.lowercase()]
                     val candidateAccounts = if (knownRecord != null && knownRecord.username.isNotBlank()) {
                         Log.i(TAG, "[$quality] ♻️ Torrent infoHash [$infoHash] already in account ${knownRecord.username}, reusing it directly!")
-                        listOf(PikPakAccount(username = knownRecord.username, password = sharedPass)) + assignedAccounts.filter { it.username != knownRecord.username }
+                        listOf(PikPakAccount(username = knownRecord.username, password = sharedPass))
                     } else {
-                        assignedAccounts
+                        assignedAccounts.take(1)
                     }
 
                     for (acc in candidateAccounts) {
@@ -434,43 +441,54 @@ class PikPakStreamResolver(
                                 if (postgresUrl.isNotBlank() && !isReusedAccount) {
                                     launch(Dispatchers.IO) { PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username) }
                                 }
-                                continue // try next account if login failed
+                                Log.w(TAG, "[$quality] Login failed for account ${acc.username}")
+                                break
                             }
 
                             val session = authRes.getOrNull() ?: continue
-                            val fileRes = pikpakClient.addMagnetAndGetResolvedFile(
-                                magnetUrl = magnet,
-                                session = session,
-                                targetFileName = torr.behaviorHints?.bingeGroup ?: torr.title
-                            )
+                            val targetNameHint = torr.behaviorHints?.filename ?: torr.title
 
-                            if (fileRes.isFailure) {
-                                val ex = fileRes.exceptionOrNull()
-                                val msg = ex?.message.orEmpty()
-                                if (msg.contains("limit", ignoreCase = true) || msg.contains("task_daily", ignoreCase = true) || msg.contains("403", ignoreCase = true) || msg.contains("space", ignoreCase = true)) {
-                                    Log.w(TAG, "[$quality] Account ${acc.username} quota limit exceeded: $msg")
-                                    if (postgresUrl.isNotBlank() && !isReusedAccount) {
-                                        launch(Dispatchers.IO) { PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username) }
-                                    }
-                                    continue // Account is exhausted, try next account!
-                                }
+                            // Primary Method: Extract stream via Python pikpakapi directly
+                            Log.i(TAG, "[$quality] 🐍 Extracting stream using Python pikpakapi for ${acc.username}...")
+                            val pyDetails = pythonBridge.resolveStreamDetailsWithPython(
+                                username = acc.username,
+                                password = acc.password,
+                                magnet = magnet,
+                                fileId = knownRecord?.fileId,
+                                fileName = targetNameHint
+                            )
+                            val pyResp = pyDetails.getOrNull()
+
+                            val resolvedFile: PikPakResolvedFile? = if (pyDetails.isSuccess && pyResp != null && !pyResp.stream_url.isNullOrBlank()) {
+                                Log.i(TAG, "[$quality] 🎉 Successfully extracted via Python pikpakapi: ${pyResp.name} (fileId=${pyResp.file_id})")
+                                PikPakResolvedFile(
+                                    fileId = pyResp.file_id.orEmpty(),
+                                    baseFileId = pyResp.file_id.orEmpty(),
+                                    streamUrl = pyResp.stream_url.orEmpty(),
+                                    username = session.username,
+                                    accessToken = session.accessToken,
+                                    refreshToken = session.refreshToken,
+                                    userId = session.userId,
+                                    deviceId = session.deviceId,
+                                    loginTime = session.loginTime
+                                )
+                            } else {
+                                Log.w(TAG, "[$quality] Python pikpakapi failed: ${pyDetails.exceptionOrNull()?.message}")
+                                null
                             }
 
-                            val resolvedFile = fileRes.getOrNull()
                             val streamUrl = resolvedFile?.streamUrl.orEmpty()
                             val isThrottled = streamUrl.contains("x_limited=1") || streamUrl.contains("ms=102400") || streamUrl.contains("ms=1048576")
 
                             if (resolvedFile != null && streamUrl.isNotBlank() && !isThrottled) {
-                                Log.i(TAG, "🎉 RESOLVED [$quality] -> EMITTING TO SCREEN NOW!")
+                                Log.i(TAG, "🎉 RESOLVED [$quality] -> EMITTING TO SCREEN NOW! | Account: ${resolvedFile.username} | UserID: ${resolvedFile.userId} | FileID: ${resolvedFile.fileId}")
 
-                                // Mark account as used immediately so other movies or workers don't overfill it!
-                                if (postgresUrl.isNotBlank()) {
+                                if (postgresUrl.isNotBlank() && !isReusedAccount) {
                                     launch(Dispatchers.IO) {
                                         PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username)
                                     }
                                 }
 
-                                // Save to PostgreSQL pikpak_v2 table asynchronously
                                 if (postgresUrl.isNotBlank()) {
                                     val v2Record = PikPakV2Record(
                                         imdbId = id,
@@ -498,7 +516,10 @@ class PikPakStreamResolver(
 
                                 val isDownscaled = (quality.contains("1080", ignoreCase = true) || quality.contains("4k", ignoreCase = true) || quality.contains("2160", ignoreCase = true)) &&
                                         (resolvedFile.streamUrl.contains("category=transcoded", ignoreCase = true) || resolvedFile.streamUrl.contains("category=transcode", ignoreCase = true))
-                                val effectiveQualityName = if (isDownscaled) "📽️ $quality ⬇" else "📽️ $quality"
+                                val downTag = if (isDownscaled) " ⬇" else ""
+                                val isArchive = pikpakClient.checkStreamArchiveStatus(resolvedFile.streamUrl)
+                                val arcTag = if (isArchive) " ARC" else ""
+                                val effectiveQualityName = "📽️ $quality$downTag$arcTag"
 
                                 val newStream = StremioStreamSource(
                                     name = effectiveQualityName,
@@ -512,22 +533,20 @@ class PikPakStreamResolver(
                                     accumulatedStreams.add(newStream)
                                     send(accumulatedStreams.toList())
                                 }
+                                Log.i(TAG, "🎉 EMITTED [$quality] to screen -> ${newStream.name} | Account: ${resolvedFile.username} | UserID: ${resolvedFile.userId}")
                                 qualityResolved = true
-                                break // Quality resolved!
+                                break
                             } else if (isThrottled) {
-                                Log.w(TAG, "[$quality] Account ${acc.username} generated a throttled link, rotating account...")
-                                if (postgresUrl.isNotBlank()) {
+                                Log.w(TAG, "[$quality] Account ${acc.username} generated a throttled link")
+                                if (postgresUrl.isNotBlank() && !isReusedAccount) {
                                     launch(Dispatchers.IO) { PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username) }
                                 }
-                                continue
-                            } else {
-                                // Magnet not cached in PikPak Cloud Drive -> Break account loop to try next candidate torrent!
-                                Log.d(TAG, "[$quality] Candidate [$infoHash] not instant-cached in cloud drive, trying next candidate...")
                                 break
                             }
                         } catch (e: Exception) {
                             if (e is kotlinx.coroutines.CancellationException) throw e
                             Log.e(TAG, "Error resolving candidate [$infoHash]", e)
+                            break
                         }
                     }
                 }
@@ -548,11 +567,71 @@ class PikPakStreamResolver(
         result
     }
 
+    suspend fun triggerArchiveThawForUrl(url: String): Boolean = withContext(Dispatchers.IO) {
+        val fileId = Regex("""[?&]fileid=([a-zA-Z0-9_-]+)""").find(url)?.groupValues?.get(1) ?: return@withContext false
+        val userId = Regex("""[?&]userid=([a-zA-Z0-9_-]+)""").find(url)?.groupValues?.get(1)
+        val config = loadConfig()
+        val postgresUrl = config.postgresUrl.orEmpty()
+        val sharedPass = if (config.pikpakPassword.isNotBlank()) config.pikpakPassword else config.primaryAccount?.password.orEmpty()
+
+        val record = if (postgresUrl.isNotBlank()) {
+            PostgresAccountFetcher.getPikpakV2RecordForFileId(postgresUrl, fileId, userId)
+        } else null
+
+        if (record != null && record.username.isNotBlank()) {
+            var token = record.accessToken
+            val now = System.currentTimeMillis() / 1000.0
+            if ((now - record.loginTime) > 7000.0 || token.isBlank()) {
+                val loginRes = pikpakClient.login(record.username, sharedPass)
+                if (loginRes.isSuccess) {
+                    token = loginRes.getOrNull()?.accessToken.orEmpty()
+                }
+            }
+            if (token.isNotBlank()) {
+                val lastTime = lastThawTrigger[fileId] ?: 0L
+                val currentTime = System.currentTimeMillis()
+                // Re-inject offline_download once per 45s during player retry cycles to command PikPak's cluster to pull blocks
+                if (currentTime - lastTime > 45_000L && record.infoHash.isNotBlank()) {
+                    lastThawTrigger[fileId] = currentTime
+                    Log.i(TAG, "❄️ Waking up cold archive via cloud offline_download engine for fileId=$fileId, hash=${record.infoHash}")
+                    val session = PikPakAuthSession(
+                        username = record.username,
+                        accessToken = token,
+                        refreshToken = record.refreshToken,
+                        userId = record.userId,
+                        deviceId = record.deviceId.ifBlank { java.util.UUID.randomUUID().toString().replace("-", "") },
+                        loginTime = record.loginTime
+                    )
+                    val targetName = record.title.ifBlank { record.filename }
+                    pikpakClient.addMagnetAndGetResolvedFile(
+                        magnetUrl = "magnet:?xt=urn:btih:${record.infoHash}",
+                        session = session,
+                        targetFileName = targetName
+                    )
+                }
+
+                Log.i(TAG, "❄️ Waking up / refreshing stream URL on PikPak control plane for fileId=$fileId via ${record.username}")
+                val direct = pikpakClient.getDirectStreamUrlForFile(
+                    fileId = fileId,
+                    token = token,
+                    targetFileName = record.title.ifBlank { record.filename },
+                    deviceId = record.deviceId.ifBlank { java.util.UUID.randomUUID().toString().replace("-", "") },
+                    userId = record.userId
+                )
+                return@withContext direct.isSuccess
+            }
+        }
+        false
+    }
+
     suspend fun resolveDirectStreamUrlOnDemand(
         stream: StremioStreamSource,
         imdbId: String
     ): Result<String> = withContext(Dispatchers.IO) {
-        if (!stream.url.isNullOrBlank() && (stream.url.startsWith("http://") || stream.url.startsWith("https://"))) {
+        val existingUrl = stream.url
+        val isArcStream = stream.name?.contains("ARC", ignoreCase = true) == true ||
+                stream.title?.contains("ARC", ignoreCase = true) == true
+        if (!isArcStream && !existingUrl.isNullOrBlank() && (existingUrl.startsWith("http://") || existingUrl.startsWith("https://"))) {
             return@withContext Result.success(stream.url)
         }
 
@@ -565,73 +644,60 @@ class PikPakStreamResolver(
         val postgresUrl = config.postgresUrl.orEmpty()
         val sharedPass = if (config.pikpakPassword.isNotBlank()) config.pikpakPassword else config.primaryAccount?.password.orEmpty()
 
-        var accounts = if (postgresUrl.isNotBlank()) {
-            val dbRes = PostgresAccountFetcher.fetchUsernames(postgresUrl)
-            dbRes.getOrNull()?.map { email -> PikPakAccount(username = email, password = sharedPass) } ?: emptyList()
+        val knownRecord = if (postgresUrl.isNotBlank()) {
+            PostgresAccountFetcher.getPikpakV2RecordsForInfoHashes(postgresUrl, listOf(infoHash))
+                .firstOrNull { it.infoHash.equals(infoHash, ignoreCase = true) && it.username.isNotBlank() }
         } else {
-            listOfNotNull(config.primaryAccount)
-        }
-
-        if (accounts.isEmpty() && config.primaryAccount != null) {
-            accounts = listOf(config.primaryAccount!!)
+            null
         }
 
         val magnet = "magnet:?xt=urn:btih:$infoHash"
-        val qualityClean = stream.name?.replace("Torrentio\n", "")?.replace("📽️", "")?.trim() ?: "HD"
-        val streamTitle = stream.title?.lines()?.firstOrNull() ?: stream.name ?: "Stream"
+        val filenameHint = stream.behaviorHints?.filename ?: stream.title ?: knownRecord?.filename?.ifBlank { knownRecord.title }
 
-        for (acc in accounts) {
-            try {
-                Log.d(TAG, "Resolving stream with account: ${acc.username}")
-                val authRes = pikpakClient.login(acc.username, acc.password)
-                if (authRes.isFailure) {
-                    if (postgresUrl.isNotBlank()) {
-                        PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username)
-                    }
-                    continue
-                }
+        val isKnownSample = knownRecord != null && (
+            knownRecord.title.contains("sample", ignoreCase = true) ||
+            knownRecord.filename.contains("sample", ignoreCase = true) ||
+            (knownRecord.size.contains("MB", ignoreCase = true) && (knownRecord.size.replace("MB", "", ignoreCase = true).trim().toDoubleOrNull() ?: 0.0) < 100.0)
+        )
+        if (isKnownSample && postgresUrl.isNotBlank()) {
+            val targetImdb = knownRecord?.imdbId ?: imdbId
+            Log.w(TAG, "🗑️ Purging poisoned sample record from DB for imdbId=$targetImdb...")
+            launch(Dispatchers.IO) {
+                PostgresAccountFetcher.clearPikpakV2Record(postgresUrl, targetImdb)
+            }
+        }
+        val pyFileId = if (isKnownSample) null else knownRecord?.fileId
 
-                val session = authRes.getOrNull() ?: continue
-                val fileRes = pikpakClient.addMagnetAndGetResolvedFile(magnetUrl = magnet, session = session)
-                val resolvedFile = fileRes.getOrNull()
+        val candidateAccounts = mutableListOf<String>()
+        if (!knownRecord?.username.isNullOrBlank()) candidateAccounts.add(knownRecord!!.username)
+        if (postgresUrl.isNotBlank()) {
+            val pool = PostgresAccountFetcher.fetchUsernames(postgresUrl).getOrNull() ?: emptyList()
+            candidateAccounts.addAll(pool.filter { it != knownRecord?.username })
+        } else if (config.primaryAccount?.username != null) {
+            candidateAccounts.add(config.primaryAccount!!.username)
+        }
 
-                if (resolvedFile != null && resolvedFile.streamUrl.isNotBlank()) {
-                    Log.i(TAG, "🎉 Successfully resolved stream: ${resolvedFile.streamUrl.take(70)}...")
-                    if (postgresUrl.isNotBlank()) {
-                        val v2Record = PikPakV2Record(
-                            imdbId = imdbId,
-                            quality = qualityClean,
-                            title = stream.title ?: streamTitle,
-                            filename = streamTitle,
-                            fileId = resolvedFile.fileId,
-                            size = "2GB",
-                            fileExtension = "mkv",
-                            infoHash = infoHash,
-                            type = "movie",
-                            username = resolvedFile.username,
-                            encodedToken = "",
-                            accessToken = resolvedFile.accessToken,
-                            refreshToken = resolvedFile.refreshToken,
-                            userId = resolvedFile.userId,
-                            deviceId = resolvedFile.deviceId,
-                            loginTime = resolvedFile.loginTime,
-                            baseFileId = resolvedFile.baseFileId
-                        )
-                        PostgresAccountFetcher.savePikpakV2Record(postgresUrl, v2Record)
-                    }
-                    return@withContext Result.success(resolvedFile.streamUrl)
-                } else {
-                    if (postgresUrl.isNotBlank()) {
-                        PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username)
-                    }
-                }
-            } catch (e: Exception) {
-                if (postgresUrl.isNotBlank()) {
-                    PostgresAccountFetcher.markEmailAsUsed(postgresUrl, acc.username)
-                }
+        // Pure Python pikpakapi resolution (No native fallback)
+        var lastError: Throwable? = null
+        for (pyUsername in candidateAccounts.take(3)) {
+            Log.i(TAG, "🐍 Attempting stream resolution via Python pikpakapi for $pyUsername...")
+            val pyResult = pythonBridge.resolveStreamWithPython(
+                username = pyUsername,
+                password = sharedPass,
+                magnet = magnet,
+                fileId = pyFileId,
+                fileName = filenameHint
+            )
+            val pyUrl = pyResult.getOrNull()
+            if (pyResult.isSuccess && !pyUrl.isNullOrBlank()) {
+                Log.i(TAG, "🎉 Python pikpakapi resolved stream successfully: ${pyUrl.take(70)}...")
+                return@withContext Result.success(pyUrl)
+            } else {
+                lastError = pyResult.exceptionOrNull()
+                Log.w(TAG, "⚠️ Python pikpakapi resolution for $pyUsername did not succeed: ${lastError?.message}.")
             }
         }
 
-        Result.failure(IOException("Failed to resolve PikPak stream link"))
+        Result.failure(lastError ?: IOException("Python pikpakapi failed to resolve stream for infoHash=$infoHash"))
     }
 }

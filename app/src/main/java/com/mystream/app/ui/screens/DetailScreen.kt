@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
+import com.mystream.app.ui.utils.appTopBarPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -30,9 +31,11 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
+import com.mystream.app.ui.components.TrailerPlayerDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,6 +59,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -96,13 +102,6 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 
-private fun formatTransferRate(bytesPerSec: Long): String {
-    return when {
-        bytesPerSec >= 1_000_000L -> String.format("%.1f MB/s", bytesPerSec / 1_000_000.0)
-        bytesPerSec >= 1_000L -> "${bytesPerSec / 1_000} KB/s"
-        else -> "$bytesPerSec B/s"
-    }
-}
 
 @Composable
 fun DetailScreen(
@@ -140,12 +139,6 @@ fun DetailScreen(
     val isStreamRefreshFocused by streamRefreshInteractionSource.collectIsFocusedAsState()
 
     val context = androidx.compose.ui.platform.LocalContext.current
-    val torrentEngine = remember { com.mystream.app.torrent.TorrentStreamEngine.getInstance(context) }
-    val torrentStatus by torrentEngine.statusFlow.collectAsState()
-
-    var isP2PBufferingDialogVisible by remember { mutableStateOf(false) }
-    var p2pStreamingTorrent by remember { mutableStateOf<StremioStreamSource?>(null) }
-    var p2pRestartFromBeginning by remember { mutableStateOf(false) }
 
     var selectedStreamTab by rememberSaveable { mutableIntStateOf(0) } // 0 = Available Streams, 1 = All Torrents
     var selectedSeasonIndex by remember { mutableIntStateOf(0) }
@@ -155,6 +148,27 @@ fun DetailScreen(
     val episodeLazyListState = rememberLazyListState()
     val backButtonFocusRequester = remember { FocusRequester() }
     val watchlistButtonFocusRequester = remember { FocusRequester() }
+    val cinemetaTrailerFocusRequester = remember { FocusRequester() }
+    val customTrailerFocusRequester = remember { FocusRequester() }
+    var customTrailerYtId by remember { mutableStateOf<String?>(null) }
+    var isSearchingCustomTrailer by remember { mutableStateOf(false) }
+    var playCustomTrailerWhenReady by remember { mutableStateOf(false) }
+    var activePlayingTrailer by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    val appSettings by repository.appSettingsFlow.collectAsState(initial = com.mystream.app.data.model.AppSettingsConfig())
+
+    LaunchedEffect(metaDetail?.id, appSettings.preferredAudioLanguage) {
+        val dt = metaDetail ?: return@LaunchedEffect
+        val lang = appSettings.preferredAudioLanguage.ifBlank { "Hindi" }
+        isSearchingCustomTrailer = true
+        val ytId = repository.searchYouTubeTrailer(dt.name, dt.year, lang)
+        customTrailerYtId = ytId
+        isSearchingCustomTrailer = false
+        if (playCustomTrailerWhenReady && !ytId.isNullOrBlank()) {
+            activePlayingTrailer = Pair(ytId, "${dt.name} • $lang Trailer")
+            playCustomTrailerWhenReady = false
+        }
+    }
 
     val scope = rememberCoroutineScope()
 
@@ -163,11 +177,16 @@ fun DetailScreen(
     }
 
     LaunchedEffect(metaDetail, isDetailLoading) {
-        if (!isDetailLoading && metaDetail != null) {
-            kotlinx.coroutines.delay(100)
+        val detail = metaDetail
+        if (!isDetailLoading && detail != null) {
+            kotlinx.coroutines.delay(200)
             try {
-                backButtonFocusRequester.requestFocus()
                 listState.scrollToItem(0, 0)
+                if (!detail.effectiveTrailerYtId.isNullOrBlank()) {
+                    cinemetaTrailerFocusRequester.safeRequestFocus()
+                } else {
+                    customTrailerFocusRequester.safeRequestFocus()
+                }
             } catch (e: Exception) {
                 // ignore
             }
@@ -182,9 +201,9 @@ fun DetailScreen(
         streamLoadJob = scope.launch {
             if (forceRefresh || streams.isEmpty()) {
                 isStreamsLoading = true
-                isResolvingMoreStreams = true
                 if (forceRefresh) streams = emptyList()
             }
+            isResolvingMoreStreams = true
             try {
                 repository.streamStreamsForMedia(type, queryId, forceRefresh = forceRefresh).collect { newStreams ->
                     streams = newStreams
@@ -261,6 +280,42 @@ fun DetailScreen(
             .fillMaxSize()
             .background(BgDark)
     ) {
+        // Fullscreen Fixed Backdrop Poster (Always visible in full fidelity behind all elements)
+        val backdrop = metaDetail?.background ?: metaDetail?.poster
+        if (!backdrop.isNullOrBlank()) {
+            AsyncImage(
+                model = backdrop,
+                contentDescription = metaDetail?.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Layered cinematic gradient overlay (Preserves vivid artwork, guarantees high readability over bright posters)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Color(0x6607090E),
+                        0.30f to Color(0x9907090E),
+                        0.60f to Color(0xEE07090E),
+                        1.0f to Color(0xFF07090E)
+                    )
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        0.0f to Color(0xEE07090E),
+                        0.55f to Color(0xAA07090E),
+                        1.0f to Color(0x3307090E)
+                    )
+                )
+        )
+
         if (isDetailLoading || metaDetail == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = PrimaryNeon)
@@ -282,53 +337,28 @@ fun DetailScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 60.dp)
             ) {
-                // Header Backdrop Box
+                // Top Transparent Navigation Bar (Back + Watchlist)
                 item {
-                    Box(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(280.dp)
+                            .appTopBarPadding(additionalTop = 12.dp)
+                            .padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val backdrop = detail.background ?: detail.poster
-                        if (!backdrop.isNullOrBlank()) {
-                            AsyncImage(
-                                model = backdrop,
-                                contentDescription = detail.name,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-
-                        // Gradient fade
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.verticalGradient(
-                                        listOf(
-                                            Color.Transparent,
-                                            BgDark.copy(alpha = 0.5f),
-                                            BgDark
-                                        )
-                                    )
-                                )
-                        )
-
                         // Top Back Button
                         val backInteraction = remember { MutableInteractionSource() }
                         val isBackFocused by backInteraction.collectIsFocusedAsState()
 
                         Box(
                             modifier = Modifier
-                                .statusBarsPadding()
-                                .padding(top = 18.dp, start = 16.dp)
-                                .align(Alignment.TopStart)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isBackFocused) FocusRingOrange.copy(alpha = 0.2f) else Color(0x66000000))
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isBackFocused) FocusRingOrange else Color(0x4D000000))
                                 .border(
                                     if (isBackFocused) 2.5.dp else 1.dp,
-                                    if (isBackFocused) FocusRingOrange else Color.Transparent,
-                                    RoundedCornerShape(8.dp)
+                                    if (isBackFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                    RoundedCornerShape(12.dp)
                                 )
                                 .focusRequester(backButtonFocusRequester)
                                 .focusable(interactionSource = backInteraction)
@@ -340,7 +370,13 @@ fun DetailScreen(
                                             true
                                         }
                                         Key.DirectionDown -> {
-                                            if (isSeries && seasons.isNotEmpty()) {
+                                            val hasCinemeta = !metaDetail?.effectiveTrailerYtId.isNullOrBlank()
+                                            val hasCustom = !customTrailerYtId.isNullOrBlank()
+                                            if (hasCinemeta) {
+                                                cinemetaTrailerFocusRequester.safeRequestFocus()
+                                            } else if (hasCustom) {
+                                                customTrailerFocusRequester.safeRequestFocus()
+                                            } else if (isSeries && seasons.isNotEmpty()) {
                                                 firstSeasonTabFocusRequester.safeRequestFocus()
                                             } else if (isSeries && currentSeasonEpisodes.isNotEmpty()) {
                                                 firstEpisodeFocusRequester.safeRequestFocus()
@@ -355,13 +391,14 @@ fun DetailScreen(
                                     }
                                 }
                                 .clickable(interactionSource = backInteraction, indication = null, onClick = onBack)
-                                .padding(8.dp),
+                                .padding(10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back",
-                                tint = if (isBackFocused) FocusRingOrange else Color.White
+                                tint = if (isBackFocused) Color.Black else Color.White,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
@@ -372,15 +409,12 @@ fun DetailScreen(
 
                         Box(
                             modifier = Modifier
-                                .statusBarsPadding()
-                                .padding(top = 18.dp, end = 16.dp)
-                                .align(Alignment.TopEnd)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isWatchlistFocused) FocusRingOrange.copy(alpha = 0.2f) else Color(0x66000000))
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isWatchlistFocused) FocusRingOrange else Color(0x4D000000))
                                 .border(
                                     if (isWatchlistFocused) 2.5.dp else 1.dp,
-                                    if (isWatchlistFocused) FocusRingOrange else Color.Transparent,
-                                    RoundedCornerShape(8.dp)
+                                    if (isWatchlistFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                    RoundedCornerShape(12.dp)
                                 )
                                 .focusRequester(watchlistButtonFocusRequester)
                                 .focusable(interactionSource = watchlistInteraction)
@@ -392,7 +426,13 @@ fun DetailScreen(
                                             true
                                         }
                                         Key.DirectionDown -> {
-                                            if (isSeries && seasons.isNotEmpty()) {
+                                            val hasCinemeta = !metaDetail?.effectiveTrailerYtId.isNullOrBlank()
+                                            val hasCustom = !customTrailerYtId.isNullOrBlank()
+                                            if (hasCinemeta) {
+                                                cinemetaTrailerFocusRequester.safeRequestFocus()
+                                            } else if (hasCustom) {
+                                                customTrailerFocusRequester.safeRequestFocus()
+                                            } else if (isSeries && seasons.isNotEmpty()) {
                                                 firstSeasonTabFocusRequester.safeRequestFocus()
                                             } else if (isSeries && currentSeasonEpisodes.isNotEmpty()) {
                                                 firstEpisodeFocusRequester.safeRequestFocus()
@@ -456,13 +496,14 @@ fun DetailScreen(
                                         }
                                     }
                                 }
-                                .padding(8.dp),
+                                .padding(10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = if (isMediaInWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                                 contentDescription = "Watchlist",
-                                tint = if (isWatchlistFocused) FocusRingOrange else if (isMediaInWatchlist) SecondaryCyan else Color.White
+                                tint = if (isWatchlistFocused) Color.Black else if (isMediaInWatchlist) SecondaryCyan else Color.White,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
@@ -473,24 +514,36 @@ fun DetailScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
+                            .padding(horizontal = 24.dp)
                             .padding(bottom = 16.dp)
                     ) {
                         Text(
                             text = detail.name,
-                            color = TextPrimary,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Bold
+                            color = Color.White,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            style = TextStyle(
+                                shadow = Shadow(
+                                    color = Color.Black,
+                                    offset = Offset(2f, 2f),
+                                    blurRadius = 8f
+                                )
+                            )
                         )
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x66000000))
+                                .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
                             detail.year?.let { y ->
-                                Text(text = y, color = TextSecondary, fontSize = 13.sp)
+                                Text(text = y, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                             }
                             detail.imdbRating?.let { rating ->
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -510,17 +563,17 @@ fun DetailScreen(
                                 }
                             }
                             detail.runtime?.let { r ->
-                                Text(text = r, color = TextMuted, fontSize = 13.sp)
+                                Text(text = r, color = Color(0xFFCBD5E1), fontSize = 13.sp, fontWeight = FontWeight.Medium)
                             }
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(SurfaceCard)
+                                    .background(PrimaryNeon.copy(alpha = 0.25f))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = detail.type.uppercase(),
-                                    color = TextSecondary,
+                                    color = PrimaryNeon,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -528,11 +581,19 @@ fun DetailScreen(
                         }
 
                         if (detail.genres.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = detail.genres.joinToString(" • "),
                                 color = SecondaryCyan,
-                                fontSize = 12.sp
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                style = TextStyle(
+                                    shadow = Shadow(
+                                        color = Color.Black,
+                                        offset = Offset(1f, 1f),
+                                        blurRadius = 6f
+                                    )
+                                )
                             )
                         }
 
@@ -540,12 +601,207 @@ fun DetailScreen(
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = desc,
-                                color = TextMuted,
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp,
+                                color = Color(0xFFE2E8F0),
+                                fontSize = 13.5.sp,
+                                lineHeight = 19.sp,
                                 maxLines = 4,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                style = TextStyle(
+                                    shadow = Shadow(
+                                        color = Color.Black,
+                                        offset = Offset(1f, 1f),
+                                        blurRadius = 6f
+                                    )
+                                )
                             )
+                        }
+
+                        val cinemetaTrailerYtId = detail.effectiveTrailerYtId
+                        val prefLang = appSettings.preferredAudioLanguage.ifBlank { "Hindi" }
+                        val (flagEmoji, langTrailerLabel) = when (prefLang.lowercase()) {
+                            "hindi" -> Pair("🇮🇳", "Hindi Trailer")
+                            "tamil" -> Pair("🇮🇳", "Tamil Trailer")
+                            "telugu" -> Pair("🇮🇳", "Telugu Trailer")
+                            "malayalam" -> Pair("🇮🇳", "Malayalam Trailer")
+                            "kannada" -> Pair("🇮🇳", "Kannada Trailer")
+                            "spanish" -> Pair("🇪🇸", "Spanish Trailer")
+                            "french" -> Pair("🇫🇷", "French Trailer")
+                            "german" -> Pair("🇩🇪", "German Trailer")
+                            "japanese" -> Pair("🇯🇵", "Japanese Trailer")
+                            "korean" -> Pair("🇰🇷", "Korean Trailer")
+                            else -> Pair("🇮🇳", "$prefLang Trailer")
+                        }
+
+                        val showCustomTrailer = if (!cinemetaTrailerYtId.isNullOrBlank()) {
+                            !customTrailerYtId.isNullOrBlank() && customTrailerYtId != cinemetaTrailerYtId
+                        } else {
+                            true // Always show localized trailer button (or placeholder) when no official trailer
+                        }
+
+                        if (!cinemetaTrailerYtId.isNullOrBlank() || showCustomTrailer) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                // 1. Cinemeta Official Trailer Button (if available)
+                                if (!cinemetaTrailerYtId.isNullOrBlank()) {
+                                    val cinemetaInteraction = remember { MutableInteractionSource() }
+                                    val isCinemetaFocused by cinemetaInteraction.collectIsFocusedAsState()
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(if (isCinemetaFocused) FocusRingOrange else Color(0x33FF0000))
+                                            .border(
+                                                width = if (isCinemetaFocused) 2.dp else 1.dp,
+                                                color = if (isCinemetaFocused) FocusRingOrange else Color(0x88FF0000),
+                                                shape = RoundedCornerShape(20.dp)
+                                            )
+                                            .focusRequester(cinemetaTrailerFocusRequester)
+                                            .focusable(interactionSource = cinemetaInteraction)
+                                            .onPreviewKeyEvent { keyEvent ->
+                                                if (keyEvent.type == KeyEventType.KeyDown) {
+                                                    when (keyEvent.key) {
+                                                        Key.DirectionUp -> {
+                                                            scope.launch {
+                                                                listState.scrollToItem(0)
+                                                                kotlinx.coroutines.delay(20)
+                                                                backButtonFocusRequester.safeRequestFocus()
+                                                            }
+                                                            true
+                                                        }
+                                                        Key.DirectionRight -> {
+                                                            if (showCustomTrailer) {
+                                                                customTrailerFocusRequester.safeRequestFocus()
+                                                                true
+                                                            } else false
+                                                        }
+                                                        Key.DirectionDown -> {
+                                                            if (isSeries && seasons.isNotEmpty()) {
+                                                                firstSeasonTabFocusRequester.safeRequestFocus()
+                                                            } else if (isSeries && currentSeasonEpisodes.isNotEmpty()) {
+                                                                firstEpisodeFocusRequester.safeRequestFocus()
+                                                            } else if (selectedStreamTab == 1) {
+                                                                allTorrentsTabFocusRequester.safeRequestFocus()
+                                                            } else {
+                                                                availableTabFocusRequester.safeRequestFocus()
+                                                            }
+                                                            true
+                                                        }
+                                                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                                            activePlayingTrailer = Pair(cinemetaTrailerYtId, "${detail.name} • Official Trailer")
+                                                            true
+                                                        }
+                                                        else -> false
+                                                    }
+                                                } else false
+                                            }
+                                            .clickable(interactionSource = cinemetaInteraction, indication = null) {
+                                                activePlayingTrailer = Pair(cinemetaTrailerYtId, "${detail.name} • Official Trailer")
+                                            }
+                                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = "Watch Official Trailer",
+                                            tint = if (isCinemetaFocused) Color.Black else Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "Official Trailer",
+                                            color = if (isCinemetaFocused) Color.Black else Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                // 2. Localized YouTube Search Trailer Button (e.g. 🇮🇳 Hindi Trailer)
+                                if (showCustomTrailer) {
+                                    val customInteraction = remember { MutableInteractionSource() }
+                                    val isCustomFocused by customInteraction.collectIsFocusedAsState()
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(if (isCustomFocused) FocusRingOrange else Color(0x33FF9900))
+                                            .border(
+                                                width = if (isCustomFocused) 2.dp else 1.dp,
+                                                color = if (isCustomFocused) FocusRingOrange else Color(0x88FF9900),
+                                                shape = RoundedCornerShape(20.dp)
+                                            )
+                                            .focusRequester(customTrailerFocusRequester)
+                                            .focusable(interactionSource = customInteraction)
+                                            .onPreviewKeyEvent { keyEvent ->
+                                                if (keyEvent.type == KeyEventType.KeyDown) {
+                                                    when (keyEvent.key) {
+                                                        Key.DirectionUp -> {
+                                                            scope.launch {
+                                                                listState.scrollToItem(0)
+                                                                kotlinx.coroutines.delay(20)
+                                                                watchlistButtonFocusRequester.safeRequestFocus()
+                                                            }
+                                                            true
+                                                        }
+                                                        Key.DirectionLeft -> {
+                                                            if (!cinemetaTrailerYtId.isNullOrBlank()) {
+                                                                cinemetaTrailerFocusRequester.safeRequestFocus()
+                                                                true
+                                                            } else false
+                                                        }
+                                                        Key.DirectionDown -> {
+                                                            if (isSeries && seasons.isNotEmpty()) {
+                                                                firstSeasonTabFocusRequester.safeRequestFocus()
+                                                            } else if (isSeries && currentSeasonEpisodes.isNotEmpty()) {
+                                                                firstEpisodeFocusRequester.safeRequestFocus()
+                                                            } else if (selectedStreamTab == 1) {
+                                                                allTorrentsTabFocusRequester.safeRequestFocus()
+                                                            } else {
+                                                                availableTabFocusRequester.safeRequestFocus()
+                                                            }
+                                                            true
+                                                        }
+                                                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                                            if (!customTrailerYtId.isNullOrBlank()) {
+                                                                activePlayingTrailer = Pair(customTrailerYtId!!, "${detail.name} • $langTrailerLabel")
+                                                            } else {
+                                                                playCustomTrailerWhenReady = true
+                                                            }
+                                                            true
+                                                        }
+                                                        else -> false
+                                                    }
+                                                } else false
+                                            }
+                                            .clickable(interactionSource = customInteraction, indication = null) {
+                                                if (!customTrailerYtId.isNullOrBlank()) {
+                                                    activePlayingTrailer = Pair(customTrailerYtId!!, "${detail.name} • $langTrailerLabel")
+                                                } else {
+                                                    playCustomTrailerWhenReady = true
+                                                }
+                                            }
+                                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = "Watch $langTrailerLabel",
+                                            tint = if (isCustomFocused) Color.Black else Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = if (isSearchingCustomTrailer && customTrailerYtId == null) "$flagEmoji Loading $langTrailerLabel..." else "$flagEmoji $langTrailerLabel",
+                                            color = if (isCustomFocused) Color.Black else Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -737,9 +993,9 @@ fun DetailScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 24.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -761,7 +1017,7 @@ fun DetailScreen(
                             )
                         }
 
-                        // Global Refresh Button
+                        // Global Refresh Button placed right beside Streams label
                         val isStreamRefreshFocused by streamRefreshInteractionSource.collectIsFocusedAsState()
                         Box(
                             modifier = Modifier
@@ -811,10 +1067,10 @@ fun DetailScreen(
                                     }
                                 }
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isStreamRefreshFocused) FocusRingOrange.copy(alpha = 0.35f) else Color(0x1FFFFFFF))
+                                .background(if (isStreamRefreshFocused) FocusRingOrange else Color(0x33000000))
                                 .border(
                                     if (isStreamRefreshFocused) 2.dp else 1.dp,
-                                    if (isStreamRefreshFocused) FocusRingOrange else GlassBorder,
+                                    if (isStreamRefreshFocused) FocusRingOrange else Color(0x33FFFFFF),
                                     RoundedCornerShape(8.dp)
                                 )
                                 .clickable(interactionSource = streamRefreshInteractionSource, indication = null) {
@@ -832,14 +1088,14 @@ fun DetailScreen(
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
                                     contentDescription = "Refresh Streams",
-                                    tint = if (isStreamRefreshFocused) FocusRingOrange else if (isResolvingMoreStreams || isStreamsLoading || isTorrentsLoading) PrimaryNeon else TextSecondary,
-                                    modifier = Modifier.size(15.dp)
+                                    tint = if (isStreamRefreshFocused) Color.Black else SecondaryCyan,
+                                    modifier = Modifier.size(14.dp)
                                 )
                                 Text(
                                     text = "Refresh",
-                                    color = if (isStreamRefreshFocused) FocusRingOrange else TextSecondary,
+                                    color = if (isStreamRefreshFocused) Color.Black else TextPrimary,
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
@@ -903,11 +1159,24 @@ fun DetailScreen(
                                 },
                             onClick = { selectedStreamTab = 0 },
                             text = {
-                                Text(
-                                    text = if (streams.isNotEmpty()) "Available Streams (${streams.size})" else "Available Streams",
-                                    fontWeight = if (isTab0Focused || selectedStreamTab == 0) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isTab0Focused) FocusRingOrange else if (selectedStreamTab == 0) PrimaryNeon else TextSecondary
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = if (streams.isNotEmpty()) "Available Streams (${streams.size})" else "Available Streams",
+                                        fontWeight = if (isTab0Focused || selectedStreamTab == 0) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isTab0Focused) FocusRingOrange else if (selectedStreamTab == 0) PrimaryNeon else TextSecondary
+                                    )
+                                    if (isResolvingMoreStreams) {
+                                        Spacer(modifier = Modifier.width(7.dp))
+                                        CircularProgressIndicator(
+                                            color = if (isTab0Focused) FocusRingOrange else PrimaryNeon,
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
                             }
                         )
 
@@ -1051,12 +1320,13 @@ fun DetailScreen(
                                 detail.id
                             }
 
-                            fun launchStream(restartFromBeginning: Boolean) {
+                            fun launchStream(restartFromBeginning: Boolean, inExternalPlayer: Boolean = false) {
                                 if (isResolvingThis) return
                                 scope.launch {
                                     val savedPos = if (restartFromBeginning) 0L else repository.getSavedPosition(currentQueryId)
                                     val existingUrl = stream.url
-                                    if (!existingUrl.isNullOrBlank() && (existingUrl.startsWith("http://") || existingUrl.startsWith("https://"))) {
+                                    val isArc = stream.isArchive || stream.name?.contains("ARC", ignoreCase = true) == true
+                                    if (!isArc && !existingUrl.isNullOrBlank() && (existingUrl.startsWith("http://") || existingUrl.startsWith("https://"))) {
                                         val playbackItem = MediaPlaybackItem(
                                             id = detail.id,
                                             title = if (isSeries && selectedEpisode != null) {
@@ -1074,7 +1344,11 @@ fun DetailScreen(
                                             startPositionMs = savedPos,
                                             headers = stream.behaviorHints?.proxyHeaders
                                         )
-                                        onPlay(playbackItem)
+                                        if (inExternalPlayer) {
+                                            com.mystream.app.ui.utils.ExternalPlayerHelper.launchExternalPlayer(context, playbackItem, savedPos)
+                                        } else {
+                                            onPlay(playbackItem)
+                                        }
                                     } else {
                                         resolvingStreamKey = streamKey
                                         try {
@@ -1088,7 +1362,7 @@ fun DetailScreen(
                                                     } else {
                                                         detail.name
                                                     },
-                                                    subtitle = "${stream.quality} • PikPak Cloud Direct",
+                                                    subtitle = "${stream.quality}${if (isArc) " ARC" else ""} • PikPak Cloud Direct",
                                                     mediaUrl = resolvedUrl,
                                                     posterUrl = selectedEpisode?.thumbnail ?: detail.poster,
                                                     backdropUrl = detail.background,
@@ -1098,7 +1372,11 @@ fun DetailScreen(
                                                     startPositionMs = savedPos,
                                                     headers = stream.behaviorHints?.proxyHeaders
                                                 )
-                                                onPlay(playbackItem)
+                                                if (inExternalPlayer) {
+                                                    com.mystream.app.ui.utils.ExternalPlayerHelper.launchExternalPlayer(context, playbackItem, savedPos)
+                                                } else {
+                                                    onPlay(playbackItem)
+                                                }
                                             } else {
                                                 val err = res.exceptionOrNull()?.message ?: "Stream resolution failed"
                                                 android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_SHORT).show()
@@ -1120,8 +1398,9 @@ fun DetailScreen(
                                     onUp = if (index == 0) {
                                         { availableTabFocusRequester.safeRequestFocus() }
                                     } else null,
-                                    onClick = { launchStream(restartFromBeginning = false) },
-                                    onRestart = { launchStream(restartFromBeginning = true) }
+                                    onClick = { launchStream(restartFromBeginning = false, inExternalPlayer = false) },
+                                    onRestart = { launchStream(restartFromBeginning = true, inExternalPlayer = false) },
+                                    onExternalPlayer = { launchStream(restartFromBeginning = false, inExternalPlayer = true) }
                                 )
                             }
                         }
@@ -1215,7 +1494,14 @@ fun DetailScreen(
                                 detail.id
                             }
 
-                            fun resolveAndPlay(restartFromBeginning: Boolean) {
+                            val matchingCached = streams.firstOrNull { it.infoHash != null && it.infoHash.equals(torr.infoHash, ignoreCase = true) }
+                            val displayTorr = if (matchingCached?.isArchive == true && !torr.isArchive) {
+                                torr.copy(name = (torr.name ?: "") + " ARC")
+                            } else {
+                                torr
+                            }
+
+                            fun resolveAndPlay(restartFromBeginning: Boolean, inExternalPlayer: Boolean = false) {
                                 if (isResolvingThis) return
                                 scope.launch {
                                     resolvingStreamKey = streamKey
@@ -1223,7 +1509,10 @@ fun DetailScreen(
                                         val res = repository.resolveAndSaveSingleTorrent(torr, detail.type, currentQueryId)
                                         val freshUrl = res.getOrNull()
                                         if (!freshUrl.isNullOrBlank()) {
+                                            loadStreams(currentQueryId)
                                             val savedPos = if (restartFromBeginning) 0L else repository.getSavedPosition(currentQueryId)
+                                            val isArc = displayTorr.isArchive || matchingCached?.isArchive == true
+                                            val arcTag = if (isArc) " ARC" else ""
                                             val playbackItem = MediaPlaybackItem(
                                                 id = detail.id,
                                                 title = if (isSeries && selectedEpisode != null) {
@@ -1231,7 +1520,7 @@ fun DetailScreen(
                                                 } else {
                                                     detail.name
                                                 },
-                                                subtitle = "${torr.quality} • PikPak Direct",
+                                                subtitle = "${torr.quality}$arcTag • PikPak Direct",
                                                 mediaUrl = freshUrl,
                                                 posterUrl = selectedEpisode?.thumbnail ?: detail.poster,
                                                 backdropUrl = detail.background,
@@ -1241,7 +1530,11 @@ fun DetailScreen(
                                                 startPositionMs = savedPos,
                                                 headers = torr.behaviorHints?.proxyHeaders
                                             )
-                                            onPlay(playbackItem)
+                                            if (inExternalPlayer) {
+                                                com.mystream.app.ui.utils.ExternalPlayerHelper.launchExternalPlayer(context, playbackItem, savedPos)
+                                            } else {
+                                                onPlay(playbackItem)
+                                            }
                                         } else {
                                             val err = res.exceptionOrNull()?.message ?: "Torrent not instant-cached on PikPak. Tap card for P2P."
                                             android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_SHORT).show()
@@ -1258,32 +1551,25 @@ fun DetailScreen(
 
                             Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 5.dp)) {
                                 StreamCard(
-                                    stream = torr,
+                                    stream = displayTorr,
                                     isResolving = isResolvingThis,
                                     externalFocusRequester = if (index == 0) firstTorrentFocusRequester else null,
                                     onUp = if (index == 0) {
                                         { allTorrentsTabFocusRequester.safeRequestFocus() }
                                     } else null,
                                     onClick = {
-                                        torr.infoHash?.let { hash ->
-                                            p2pRestartFromBeginning = false
-                                            p2pStreamingTorrent = torr
-                                            isP2PBufferingDialogVisible = true
-                                            torrentEngine.startStreaming(hash, torr.title ?: torr.name ?: "Torrent Stream")
-                                        }
+                                        resolveAndPlay(restartFromBeginning = false, inExternalPlayer = false)
                                     },
                                     onRestart = {
-                                        torr.infoHash?.let { hash ->
-                                            p2pRestartFromBeginning = true
-                                            p2pStreamingTorrent = torr
-                                            isP2PBufferingDialogVisible = true
-                                            torrentEngine.startStreaming(hash, torr.title ?: torr.name ?: "Torrent Stream")
-                                        }
+                                        resolveAndPlay(restartFromBeginning = true, inExternalPlayer = false)
                                     },
-                                    onMagnetStream = if (isUnder6Gb) {
-                                        { resolveAndPlay(restartFromBeginning = false) }
-                                    } else null,
-                                    actionButtonText = "☁ Direct"
+                                    onMagnetStream = {
+                                        resolveAndPlay(restartFromBeginning = false, inExternalPlayer = false)
+                                    },
+                                    onExternalPlayer = {
+                                        resolveAndPlay(restartFromBeginning = false, inExternalPlayer = true)
+                                    },
+                                    actionButtonText = "☁ Stream"
                                 )
                             }
                         }
@@ -1316,158 +1602,19 @@ fun DetailScreen(
                 }
             }
 
-            // P2P Streaming auto-launch when initial buffer is ready
-            LaunchedEffect(torrentStatus.isReadyForStreaming, torrentStatus.streamUrl) {
-                if (isP2PBufferingDialogVisible && torrentStatus.isReadyForStreaming && torrentStatus.streamUrl != null && p2pStreamingTorrent != null) {
-                    val torr = p2pStreamingTorrent!!
-                    val currentQueryId = if (isSeries && selectedEpisode != null) {
-                        "${detail.id}:${selectedEpisode?.season}:${selectedEpisode?.episode}"
-                    } else {
-                        detail.id
-                    }
-                    val savedPos = if (p2pRestartFromBeginning) 0L else repository.getSavedPosition(currentQueryId)
-                    p2pRestartFromBeginning = false
-                    isP2PBufferingDialogVisible = false
-                    val playbackItem = MediaPlaybackItem(
-                        id = detail.id,
-                        title = if (isSeries && selectedEpisode != null) {
-                            "${detail.name} - S${selectedEpisode?.season}E${selectedEpisode?.episode}: ${selectedEpisode?.name ?: ""}"
-                        } else {
-                            detail.name
-                        },
-                        subtitle = "${torr.quality} • 🧲 P2P Direct Stream",
-                        mediaUrl = torrentStatus.streamUrl!!,
-                        posterUrl = selectedEpisode?.thumbnail ?: detail.poster,
-                        backdropUrl = detail.background,
-                        isSeries = isSeries,
-                        seasonNumber = selectedEpisode?.season ?: 0,
-                        episodeNumber = selectedEpisode?.episode ?: 0,
-                        startPositionMs = savedPos,
-                        headers = null
-                    )
-                    onPlay(playbackItem)
-                }
-            }
 
-            // P2P Buffering HUD Dialog
-            if (isP2PBufferingDialogVisible) {
-                androidx.compose.ui.window.Dialog(
-                    onDismissRequest = {
-                        isP2PBufferingDialogVisible = false
-                        torrentEngine.stopStreaming()
-                    }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(SurfaceDark)
-                            .border(1.5.dp, com.mystream.app.ui.theme.AccentAmber, RoundedCornerShape(16.dp))
-                            .padding(20.dp)
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "🧲 Direct P2P Torrent Streaming",
-                                color = com.mystream.app.ui.theme.AccentAmber,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = p2pStreamingTorrent?.title?.lines()?.firstOrNull() ?: "Connecting...",
-                                color = TextPrimary,
-                                fontSize = 13.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            CircularProgressIndicator(
-                                color = com.mystream.app.ui.theme.AccentAmber,
-                                modifier = Modifier.size(36.dp),
-                                strokeWidth = 3.dp
-                            )
-                            Spacer(modifier = Modifier.height(14.dp))
-                            Text(
-                                text = torrentStatus.state,
-                                color = TextSecondary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "👤 Seeds: ${torrentStatus.seeds}",
-                                    color = TextMuted,
-                                    fontSize = 12.sp
-                                )
-                                Text(
-                                    text = "⚡ Speed: ${formatTransferRate(torrentStatus.downloadRateBytes)}",
-                                    color = TextMuted,
-                                    fontSize = 12.sp
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(16.dp))
-                            androidx.compose.material3.OutlinedButton(
-                                onClick = {
-                                    isP2PBufferingDialogVisible = false
-                                    torrentEngine.stopStreaming()
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = TextMuted)
-                            ) {
-                                Text("Cancel")
-                            }
-                        }
-                    }
-                }
-            }
 
-            // Cloud Stream Resolving / Recovering Dialog
-            if (resolvingStreamKey != null) {
-                androidx.compose.ui.window.Dialog(
-                    onDismissRequest = {
-                        resolvingStreamKey = null
-                    }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(0.85f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(SurfaceDark)
-                            .border(1.5.dp, PrimaryNeon, RoundedCornerShape(16.dp))
-                            .padding(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                color = PrimaryNeon,
-                                modifier = Modifier.size(36.dp),
-                                strokeWidth = 3.dp
-                            )
-                            Text(
-                                text = "Preparing Stream...",
-                                color = TextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Getting playback ready. Please wait...",
-                                color = TextMuted,
-                                fontSize = 12.5.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
-                    }
-                }
+
+
+
+
+            // Trailer Video Dialog
+            activePlayingTrailer?.let { (ytId, trTitle) ->
+                TrailerPlayerDialog(
+                    ytId = ytId,
+                    title = trTitle,
+                    onDismiss = { activePlayingTrailer = null }
+                )
             }
         }
     }
@@ -1543,8 +1690,15 @@ private fun EpisodeHorizontalCardItem(
                 .background(SurfaceDark)
         ) {
             if (!episode.thumbnail.isNullOrBlank()) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val epImageRequest = remember(episode.thumbnail) {
+                    coil3.request.ImageRequest.Builder(context)
+                        .data(episode.thumbnail)
+                        .size(coil3.size.Size(320, 180))
+                        .build()
+                }
                 AsyncImage(
-                    model = episode.thumbnail,
+                    model = epImageRequest,
                     contentDescription = episode.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()

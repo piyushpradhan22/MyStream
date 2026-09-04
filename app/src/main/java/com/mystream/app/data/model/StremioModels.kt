@@ -87,6 +87,18 @@ data class StremioMetaDetailResponse(
 )
 
 @Serializable
+data class StremioTrailerItem(
+    val source: String? = null,
+    val type: String? = null
+)
+
+@Serializable
+data class StremioTrailerStream(
+    val title: String? = null,
+    val ytId: String? = null
+)
+
+@Serializable
 data class StremioMetaDetail(
     val id: String,
     val name: String,
@@ -106,8 +118,25 @@ data class StremioMetaDetail(
     val country: String? = null,
     val awards: String? = null,
     val videos: List<StremioVideoEpisode> = emptyList(),
-    val trailerStreams: List<StremioTrailerStream> = emptyList()
-)
+    val trailerStreams: List<StremioTrailerStream> = emptyList(),
+    val trailers: List<StremioTrailerItem> = emptyList(),
+    val trailer: String? = null
+) {
+    val effectiveTrailerYtId: String?
+        get() {
+            trailerStreams.firstOrNull { !it.ytId.isNullOrBlank() }?.ytId?.let { return it }
+            trailers.firstOrNull { !it.source.isNullOrBlank() && (it.type == null || it.type.contains("Trailer", ignoreCase = true)) }?.source?.let { return it }
+            trailers.firstOrNull { !it.source.isNullOrBlank() }?.source?.let { return it }
+            if (!trailer.isNullOrBlank()) {
+                if (trailer.contains("youtube.com") || trailer.contains("youtu.be")) {
+                    val match = Regex("""(?:v=|youtu\.be/|embed/)([a-zA-Z0-9_-]{11})""").find(trailer)
+                    if (match != null) return match.groupValues[1]
+                }
+                if (trailer.length == 11) return trailer
+            }
+            return null
+        }
+}
 
 @Serializable
 data class StremioVideoEpisode(
@@ -121,12 +150,6 @@ data class StremioVideoEpisode(
     val thumbnail: String? = null,
     val rating: String? = null,
     val released: String? = null
-)
-
-@Serializable
-data class StremioTrailerStream(
-    val title: String? = null,
-    val ytId: String? = null
 )
 
 // --- Stream Provider Models & Parsed Stream Metadata ---
@@ -148,6 +171,10 @@ data class StremioStreamSource(
 ) {
     val isDownscaled: Boolean
         get() = name?.contains("⬇") == true || name?.contains("⬇️") == true || title?.contains("⬇") == true || title?.contains("⬇️") == true
+
+    val isArchive: Boolean
+        get() = name?.contains("ARC", ignoreCase = true) == true ||
+                title?.contains("ARC", ignoreCase = true) == true
 
     val quality: String
         get() {
@@ -255,6 +282,7 @@ data class StremioStreamSource(
 data class StremioStreamBehaviorHints(
     val notWebReady: Boolean = false,
     val bingeGroup: String? = null,
+    val filename: String? = null,
     val proxyHeaders: Map<String, String>? = null,
     val customHeaders: Map<String, String>? = null
 )

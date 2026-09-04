@@ -21,16 +21,16 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import com.mystream.app.ui.utils.appTopBarPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -38,12 +38,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import android.content.Intent
-import android.speech.RecognizerIntent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,9 +49,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -85,7 +78,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -94,7 +86,6 @@ object SearchStateHolder {
     var query: String = ""
     var rawResults: List<StremioMetaPreview> = emptyList()
     var selectedFilter: String = "All"
-    var trendingItems: List<StremioMetaPreview> = emptyList()
 }
 
 @Composable
@@ -107,21 +98,20 @@ fun SearchScreen(
     val initialSearchQuery = if (initialQuery.isNotBlank()) initialQuery else SearchStateHolder.query
     var query by remember { mutableStateOf(initialSearchQuery) }
     var rawResults by remember { mutableStateOf(if (initialQuery.isNotBlank() && initialQuery != SearchStateHolder.query) emptyList() else SearchStateHolder.rawResults) }
-    var trendingItems by remember { mutableStateOf(SearchStateHolder.trendingItems) }
     var selectedFilter by remember { mutableStateOf(SearchStateHolder.selectedFilter) }
     var isSearching by remember { mutableStateOf(false) }
     var isSearchEditing by remember { mutableStateOf(false) }
 
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var searchJob by remember { mutableStateOf<Job?>(null) }
+    val backFocusRequester = remember { FocusRequester() }
     val searchFocusRequester = remember { FocusRequester() }
-    val micFocusRequester = remember { FocusRequester() }
+    val chipAllFocusRequester = remember { FocusRequester() }
+    val firstResultFocusRequester = remember { FocusRequester() }
     var isSearchFieldFocused by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val density = LocalDensity.current
     val isImeVisible = WindowInsets.ime.getBottom(density) > 0
-    val isEditing = isImeVisible || isSearchEditing
 
     fun performSearch(text: String) {
         val clean = text.trim()
@@ -140,7 +130,7 @@ fun SearchScreen(
                 // 1. Instant local search in Indian catalog if query matches
                 val localMatches = repository.searchIndianCatalog(clean)
 
-                // 2. Fetch Cinemeta movie and series catalogs concurrently with individual error handling
+                // 2. Fetch Cinemeta movie and series catalogs concurrently
                 val movieDeferred = async(Dispatchers.IO) {
                     try {
                         repository.fetchCatalog("movie", "top", search = clean).metas
@@ -169,7 +159,7 @@ fun SearchScreen(
                     rawResults = combined
                 }
             } catch (e: CancellationException) {
-                // DO NOT wipe rawResults on cancellation! A newer search job is already running.
+                // Ignore cancellation
             } catch (_: Exception) {
                 if (isActive) {
                     rawResults = emptyList()
@@ -182,36 +172,10 @@ fun SearchScreen(
         }
     }
 
-    val speechRecognizerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-            if (!spokenText.isNullOrBlank()) {
-                query = spokenText
-                SearchStateHolder.query = spokenText
-                performSearch(spokenText)
-            }
-        }
-    }
-
-    fun launchVoiceSearch() {
-        try {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Search movies and series...")
-            }
-            speechRecognizerLauncher.launch(intent)
-        } catch (e: Exception) {
-            android.widget.Toast.makeText(context, "Voice search is not available", android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    LaunchedEffect(query, rawResults, selectedFilter, trendingItems) {
+    LaunchedEffect(query, rawResults, selectedFilter) {
         SearchStateHolder.query = query
         SearchStateHolder.rawResults = rawResults
         SearchStateHolder.selectedFilter = selectedFilter
-        SearchStateHolder.trendingItems = trendingItems
     }
 
     fun enterSearchEditingMode() {
@@ -239,17 +203,6 @@ fun SearchScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        if (trendingItems.isEmpty()) {
-            try {
-                val movies = repository.fetchCatalog("movie", "top", skip = 0).metas
-                val series = repository.fetchCatalog("series", "top", skip = 0).metas
-                trendingItems = (movies + series).distinctBy { it.id }
-            } catch (_: Exception) {
-            }
-        }
-    }
-
     LaunchedEffect(initialQuery) {
         if (initialQuery.isNotBlank()) {
             delay(150)
@@ -273,14 +226,15 @@ fun SearchScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
+                .appTopBarPadding(additionalTop = 10.dp)
                 .padding(horizontal = 16.dp)
-                .padding(top = 16.dp, bottom = 12.dp)
+                .padding(bottom = 12.dp)
         ) {
+            // Search Top Bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val backInteraction = remember { MutableInteractionSource() }
                 val isBackFocused by backInteraction.collectIsFocusedAsState()
@@ -289,7 +243,7 @@ fun SearchScreen(
                     onClick = onBack,
                     interactionSource = backInteraction,
                     modifier = Modifier
-                        .focusProperties { canFocus = !isEditing }
+                        .focusRequester(backFocusRequester)
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (isBackFocused) FocusRingOrange.copy(alpha = 0.25f) else Color.Transparent)
                         .border(
@@ -297,6 +251,21 @@ fun SearchScreen(
                             if (isBackFocused) FocusRingOrange else Color.Transparent,
                             RoundedCornerShape(8.dp)
                         )
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                when (keyEvent.key) {
+                                    Key.DirectionRight -> {
+                                        searchFocusRequester.safeRequestFocus()
+                                        true
+                                    }
+                                    Key.DirectionDown -> {
+                                        chipAllFocusRequester.safeRequestFocus()
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            } else false
+                        }
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -320,7 +289,7 @@ fun SearchScreen(
                         query = it
                         performSearch(it)
                     },
-                    placeholder = { Text("Search Cinemeta (movies, series)...", color = TextMuted) },
+                    placeholder = { Text("Search", color = TextMuted) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Search,
@@ -329,23 +298,17 @@ fun SearchScreen(
                         )
                     },
                     trailingIcon = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(end = 4.dp)
-                        ) {
-                            if (query.isNotEmpty()) {
-                                IconButton(onClick = {
-                                    query = ""
-                                    rawResults = emptyList()
-                                    searchFocusRequester.safeRequestFocus()
-                                }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Clear,
-                                        contentDescription = "Clear",
-                                        tint = TextSecondary
-                                    )
-                                }
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = {
+                                query = ""
+                                rawResults = emptyList()
+                                searchFocusRequester.safeRequestFocus()
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Clear,
+                                    contentDescription = "Clear",
+                                    tint = TextSecondary
+                                )
                             }
                         }
                     },
@@ -361,6 +324,11 @@ fun SearchScreen(
                             performSearch(query)
                             isSearchEditing = false
                             keyboardController?.hide()
+                            if (displayedResults.isNotEmpty()) {
+                                firstResultFocusRequester.safeRequestFocus()
+                            } else {
+                                chipAllFocusRequester.safeRequestFocus()
+                            }
                         }
                     ),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -378,15 +346,30 @@ fun SearchScreen(
                         .onPreviewKeyEvent { keyEvent ->
                             if (keyEvent.type == KeyEventType.KeyDown) {
                                 when (keyEvent.key) {
+                                    Key.DirectionLeft -> {
+                                        backFocusRequester.safeRequestFocus()
+                                        true
+                                    }
+
+                                    Key.DirectionDown -> {
+                                        isSearchEditing = false
+                                        keyboardController?.hide()
+                                        chipAllFocusRequester.safeRequestFocus()
+                                        true
+                                    }
+
                                     Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
                                         enterSearchEditingMode()
                                         true
                                     }
 
                                     Key.Back -> {
-                                        isSearchEditing = false
-                                        keyboardController?.hide()
-                                        false
+                                        if (isSearchEditing || isImeVisible) {
+                                            isSearchEditing = false
+                                            keyboardController?.hide()
+                                            searchFocusRequester.safeRequestFocus()
+                                            true
+                                        } else false
                                     }
 
                                     else -> false
@@ -394,62 +377,24 @@ fun SearchScreen(
                             } else false
                         }
                 )
-
-                val micInteraction = remember { MutableInteractionSource() }
-                val isMicFocused by micInteraction.collectIsFocusedAsState()
-
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (isMicFocused) FocusRingOrange else SurfaceDark)
-                        .border(
-                            width = if (isMicFocused) 2.dp else 1.dp,
-                            color = if (isMicFocused) FocusRingOrange else Color(0x33FFFFFF),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        .focusRequester(micFocusRequester)
-                        .focusable(interactionSource = micInteraction)
-                        .onPreviewKeyEvent { keyEvent ->
-                            if (keyEvent.type == KeyEventType.KeyDown) {
-                                when (keyEvent.key) {
-                                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                                        launchVoiceSearch()
-                                        true
-                                    }
-                                    else -> false
-                                }
-                            } else false
-                        }
-                        .clickable(interactionSource = micInteraction, indication = null) {
-                            launchVoiceSearch()
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Voice Search",
-                        tint = if (isMicFocused) Color.Black else FocusRingOrange,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
+            // Filter Chips (All, Movies, Series)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(horizontal = 4.dp)
             ) {
-                listOf("All", "Movies", "Series").forEach { filter ->
+                listOf("All", "Movies", "Series").forEachIndexed { idx, filter ->
                     val isSelected = selectedFilter == filter
                     val chipInteraction = remember { MutableInteractionSource() }
                     val isChipFocused by chipInteraction.collectIsFocusedAsState()
 
                     Box(
                         modifier = Modifier
-                            .focusProperties { canFocus = !isEditing }
+                            .then(if (idx == 0) Modifier.focusRequester(chipAllFocusRequester) else Modifier)
                             .clip(RoundedCornerShape(20.dp))
                             .background(
                                 if (isChipFocused) FocusRingOrange.copy(alpha = 0.25f)
@@ -464,6 +409,27 @@ fun SearchScreen(
                                 shape = RoundedCornerShape(20.dp)
                             )
                             .focusable(interactionSource = chipInteraction)
+                            .onPreviewKeyEvent { keyEvent ->
+                                if (keyEvent.type == KeyEventType.KeyDown) {
+                                    when (keyEvent.key) {
+                                        Key.DirectionUp -> {
+                                            searchFocusRequester.safeRequestFocus()
+                                            true
+                                        }
+                                        Key.DirectionDown -> {
+                                            if (displayedResults.isNotEmpty()) {
+                                                firstResultFocusRequester.safeRequestFocus()
+                                                true
+                                            } else false
+                                        }
+                                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                            selectedFilter = filter
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                } else false
+                            }
                             .clickable(interactionSource = chipInteraction, indication = null) {
                                 selectedFilter = filter
                             }
@@ -479,8 +445,9 @@ fun SearchScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
+            // Search Content / Results
             if (isSearching) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -509,30 +476,27 @@ fun SearchScreen(
                     }
                 }
             } else if (query.isBlank()) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    Text(
-                        text = "Popular & Trending",
-                        color = TextPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
-
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 105.dp),
-                        contentPadding = PaddingValues(bottom = 30.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxSize()
+                // Clean empty state (no popular/trending section)
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(trendingItems, key = { it.id }) { item ->
-                            PosterCard(
-                                item = item,
-                                modifier = Modifier.focusProperties { canFocus = !isEditing },
-                                width = 110,
-                                onClick = { onNavigateToDetail(item.type, item.id) }
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = TextMuted.copy(alpha = 0.4f),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            text = "Search movies, series, and more",
+                            color = TextMuted.copy(alpha = 0.7f),
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                 }
             } else {
@@ -543,10 +507,19 @@ fun SearchScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(displayedResults, key = { it.id }) { item ->
+                    itemsIndexed(displayedResults, key = { _, item -> item.id }) { index, item ->
                         PosterCard(
                             item = item,
-                            modifier = Modifier.focusProperties { canFocus = !isEditing },
+                            modifier = Modifier
+                                .then(if (index == 0) Modifier.focusRequester(firstResultFocusRequester) else Modifier)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionUp) {
+                                        if (index < 4) {
+                                            chipAllFocusRequester.safeRequestFocus()
+                                            true
+                                        } else false
+                                    } else false
+                                },
                             width = 110,
                             onClick = { onNavigateToDetail(item.type, item.id) }
                         )

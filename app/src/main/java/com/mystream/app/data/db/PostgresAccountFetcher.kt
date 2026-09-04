@@ -178,7 +178,12 @@ object PostgresAccountFetcher {
         }
 
         // 4. Send Query
-        Log.d(TAG, "Executing Query: $query")
+        val queryLog = when {
+            query.contains("INSERT INTO pikpak_v2", ignoreCase = true) -> "INSERT INTO pikpak_v2 <redacted values>"
+            query.contains("access_token", ignoreCase = true) || query.contains("refresh_token", ignoreCase = true) -> query.take(180) + " <redacted>"
+            else -> query
+        }
+        Log.d(TAG, "Executing Query: $queryLog")
         val qb = "$query\u0000".toByteArray()
         outStream.writeByte('Q'.code)
         outStream.writeInt(4 + qb.size)
@@ -358,6 +363,51 @@ object PostgresAccountFetcher {
             Log.w(TAG, "getPikpakV2RecordsForInfoHashes error", e)
         }
         list
+    }
+
+    suspend fun getPikpakV2RecordForFileId(postgresUrl: String, fileId: String, userId: String? = null): PikPakV2Record? = withContext(Dispatchers.IO) {
+        if (postgresUrl.isBlank() || (fileId.isBlank() && userId.isNullOrBlank())) return@withContext null
+        try {
+            val config = parseUrl(postgresUrl)
+            val conditions = mutableListOf<String>()
+            if (fileId.isNotBlank()) {
+                val cleanFileId = "'" + fileId.replace("'", "''") + "'"
+                conditions.add("file_id = $cleanFileId")
+                conditions.add("base_file_id = $cleanFileId")
+            }
+            if (!userId.isNullOrBlank()) {
+                val cleanUserId = "'" + userId.replace("'", "''") + "'"
+                conditions.add("user_id = $cleanUserId")
+            }
+            val whereClause = conditions.joinToString(" OR ")
+            val query = "SELECT imdb_id, quality, title, filename, file_id, size, file_extension, \"infoHash\", type, username, encoded_token, access_token, refresh_token, user_id, device_id, login_time, base_file_id FROM pikpak_v2 WHERE $whereClause ORDER BY time DESC LIMIT 1"
+            val rows = executePgQuery(config, query)
+            val r = rows.firstOrNull() ?: return@withContext null
+            if (r.size >= 17 && r[4].isNotBlank()) {
+                return@withContext PikPakV2Record(
+                    imdbId = r[0],
+                    quality = r[1],
+                    title = r[2],
+                    filename = r[3],
+                    fileId = r[4],
+                    size = r[5],
+                    fileExtension = r[6],
+                    infoHash = r[7],
+                    type = r[8],
+                    username = r[9],
+                    encodedToken = r[10],
+                    accessToken = r[11],
+                    refreshToken = r[12],
+                    userId = r[13],
+                    deviceId = r[14],
+                    loginTime = r[15].toDoubleOrNull() ?: 0.0,
+                    baseFileId = r[16]
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "getPikpakV2RecordForFileId error", e)
+        }
+        null
     }
 
     suspend fun savePikpakV2Record(postgresUrl: String, record: PikPakV2Record) = withContext(Dispatchers.IO) {

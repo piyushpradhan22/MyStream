@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    id("com.chaquo.python")
 }
 
 android {
@@ -13,12 +14,15 @@ android {
         applicationId = "com.mystream.app"
         minSdk = 30
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.0.13"
+        versionCode = 15
+        versionName = "1.0.14"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
     }
 
@@ -50,7 +54,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            include("arm64-v8a", "armeabi-v7a")
             isUniversalApk = true
         }
     }
@@ -115,15 +119,25 @@ dependencies {
     // DataStore
     implementation(libs.androidx.datastore.preferences)
 
-    // PostgreSQL JDBC (for dynamic account fetching)
-    implementation(libs.postgresql)
-
-    // BitTorrent Engine & Localhost Streaming Server
-    implementation(libs.nanohttpd)
-    implementation(libs.libtorrent4j)
-    implementation(libs.libtorrent4j.arm64)
-    implementation(libs.libtorrent4j.arm)
-    implementation(libs.libtorrent4j.x8664)
-
     debugImplementation(libs.androidx.ui.tooling)
+}
+
+chaquopy {
+    defaultConfig {
+        val macBrewPython = file("/opt/homebrew/bin/python3.11")
+        val linuxPython = file("/usr/bin/python3")
+        when {
+            macBrewPython.exists() -> buildPython(macBrewPython.absolutePath)
+            linuxPython.exists() -> buildPython(linuxPython.absolutePath)
+        }
+        version = "3.11"
+        pip {
+            install("pikpakapi")
+        }
+        pyc {
+            src = true
+            pip = true
+            stdlib = false
+        }
+    }
 }

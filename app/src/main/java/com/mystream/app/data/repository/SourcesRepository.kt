@@ -1,6 +1,7 @@
 package com.mystream.app.data.repository
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -21,6 +22,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -34,9 +37,11 @@ private val Context.dataStore by preferencesDataStore(name = "mystream_settings"
 
 class SourcesRepository(
     private val context: Context,
-    private val apiClient: StremioApiClient = StremioApiClient(),
+    private val apiClient: StremioApiClient = StremioApiClient(cacheDir = context.cacheDir),
     val pikpakResolver: PikPakStreamResolver = PikPakStreamResolver(context)
 ) {
+    var bootFeaturedPool: List<StremioMetaPreview>? = null
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     companion object {
@@ -445,19 +450,33 @@ class SourcesRepository(
             .map { it.toStremioMetaPreview() }
     }
 
+    private val catalogMemoryCache = object : java.util.LinkedHashMap<String, StremioCatalogResponse>(60, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, StremioCatalogResponse>?): Boolean = size > 60
+    }
+    private val metaDetailMemoryCache = object : java.util.LinkedHashMap<String, StremioMetaDetail>(60, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, StremioMetaDetail>?): Boolean = size > 60
+    }
+
     suspend fun fetchCatalog(
         type: String,
         catalogId: String = "top",
         genre: String? = null,
         search: String? = null,
         skip: Int = 0,
-        sourceUrl: String = DEFAULT_CATALOG_SOURCES.first().baseUrl
+        sourceUrl: String = DEFAULT_CATALOG_SOURCES.first().baseUrl,
+        forceRefresh: Boolean = false
     ): StremioCatalogResponse {
         if (catalogId == "imdb-indian" || type == "indian") {
             val category = genre?.takeIf { it.isNotBlank() } ?: "Top Rated"
             return fetchIndianCatalog(category = category, skip = skip, limit = 20)
         }
-        return apiClient.getCatalog(
+        val cacheKey = "$sourceUrl|$type|$catalogId|${genre.orEmpty()}|${search.orEmpty()}|$skip"
+        if (!forceRefresh) {
+            synchronized(catalogMemoryCache) {
+                catalogMemoryCache[cacheKey]?.let { return it }
+            }
+        }
+        val response = apiClient.getCatalog(
             baseUrl = sourceUrl,
             type = type,
             id = catalogId,
@@ -465,14 +484,30 @@ class SourcesRepository(
             searchQuery = search,
             skip = skip
         )
+        if (response.metas.isNotEmpty()) {
+            synchronized(catalogMemoryCache) {
+                catalogMemoryCache[cacheKey] = response
+            }
+        }
+        return response
     }
 
     suspend fun fetchMetaDetail(
         type: String,
         id: String,
-        sourceUrl: String = DEFAULT_CATALOG_SOURCES.first().baseUrl
+        sourceUrl: String = DEFAULT_CATALOG_SOURCES.first().baseUrl,
+        forceRefresh: Boolean = false
     ): StremioMetaDetail {
+        val cacheKey = "$sourceUrl|$type|$id"
+        if (!forceRefresh) {
+            synchronized(metaDetailMemoryCache) {
+                metaDetailMemoryCache[cacheKey]?.let { return it }
+            }
+        }
         val response = apiClient.getMetaDetail(sourceUrl, type, id)
+        synchronized(metaDetailMemoryCache) {
+            metaDetailMemoryCache[cacheKey] = response.meta
+        }
         return response.meta
     }
 
@@ -572,6 +607,51 @@ class SourcesRepository(
             val cached = getPersistedStreams(cacheKey, configuredTtl)
             if (!cached.isNullOrEmpty()) {
                 emit(cached)
+                val needsProbe = cached.any { !it.url.isNullOrBlank() && !it.isArchive }
+                if (needsProbe) {
+                    // Independent IO scope so background persist is NEVER cancelled by navigation
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            val refreshedList = cached.map { s ->
+                                async(Dispatchers.IO) {
+                                    if (!s.url.isNullOrBlank() && !s.isArchive) {
+                                        val isArc = pikpakResolver.checkStreamArchiveStatus(s.url)
+                                        if (isArc) {
+                                            s.copy(name = (s.name ?: "Stream") + " ARC")
+                                        } else {
+                                            s
+                                        }
+                                    } else {
+                                        s
+                                    }
+                                }
+                            }.awaitAll()
+                            if (refreshedList != cached) {
+                                persistStreams(cacheKey, refreshedList, configuredTtl)
+                                Log.i("SourcesRepository", "❄️ Persisted ${refreshedList.count { it.isArchive }} ARC streams to disk for $cacheKey")
+                            }
+                        } catch (e: Exception) {
+                            Log.w("SourcesRepository", "Background ARC probe failed: ${e.message}")
+                        }
+                    }
+
+                    // Fast in-flow parallel emit (timeout 900ms) so cards update reactively
+                    try {
+                        kotlinx.coroutines.withTimeoutOrNull(900L) {
+                            val fastRefreshed = cached.map { s ->
+                                async(Dispatchers.IO) {
+                                    if (!s.url.isNullOrBlank() && !s.isArchive) {
+                                        val isArc = pikpakResolver.checkStreamArchiveStatus(s.url)
+                                        if (isArc) s.copy(name = (s.name ?: "Stream") + " ARC") else s
+                                    } else s
+                                }
+                            }.awaitAll()
+                            if (fastRefreshed != cached) {
+                                emit(fastRefreshed)
+                            }
+                        }
+                    } catch (ignored: Exception) {}
+                }
                 return@flow
             }
         } else {
@@ -622,6 +702,10 @@ class SourcesRepository(
         return streams
     }
 
+    suspend fun checkStreamArchiveStatus(url: String): Boolean {
+        return pikpakResolver.checkStreamArchiveStatus(url)
+    }
+
     suspend fun resolveSpecificStream(
         stream: StremioStreamSource,
         imdbId: String
@@ -641,7 +725,10 @@ class SourcesRepository(
         val res = pikpakResolver.resolveDirectStreamUrlOnDemand(stream, queryId)
         val url = res.getOrNull()
         if (!url.isNullOrBlank()) {
+            val isArchive = pikpakResolver.checkStreamArchiveStatus(url)
+            val arcTag = if (isArchive && stream.name?.contains("ARC", ignoreCase = true) != true) " ARC" else ""
             val resolvedStream = stream.copy(
+                name = (stream.name ?: "Stream") + arcTag,
                 url = url,
                 providerName = "PP"
             )
@@ -653,5 +740,54 @@ class SourcesRepository(
             persistStreams(cacheKey, updated, settings.linkCacheTtlHours)
         }
         return res
+    }
+
+    private val youtubeTrailerCache = mutableMapOf<String, String>()
+    private val httpClient = OkHttpClient.Builder().build()
+
+    suspend fun searchYouTubeTrailer(
+        title: String,
+        year: String?,
+        language: String = "Hindi"
+    ): String? = withContext(Dispatchers.IO) {
+        val cacheKey = "${title}_${year}_$language".lowercase()
+        youtubeTrailerCache[cacheKey]?.let { return@withContext it }
+
+        val query = listOfNotNull(title, year, language, "trailer").joinToString(" ")
+        try {
+            val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+            // sp=EgIQAQ%253D%253D is YouTube search filter for Type: Video (excludes Shorts carousels, playlists, channels)
+            val request = Request.Builder()
+                .url("https://www.youtube.com/results?search_query=$encodedQuery&sp=EgIQAQ%253D%253D")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val html = response.body?.string() ?: return@withContext null
+
+            // 1. Specifically match "videoRenderer" (Standard full-length landscape videos, excludes Shorts/Reels)
+            val videoRendererRegex = Regex(""""videoRenderer":\{"videoId":"([a-zA-Z0-9_-]{11})"""")
+            val matches = videoRendererRegex.findAll(html).map { it.groupValues[1] }.distinct().toList()
+
+            for (vid in matches) {
+                // Ensure this video is not a Short
+                if (!html.contains("""/shorts/$vid""") && !html.contains(""""reelItemRenderer"""") && !html.contains(""""shortsLockupViewModel"""")) {
+                    youtubeTrailerCache[cacheKey] = vid
+                    return@withContext vid
+                }
+            }
+
+            // 2. Fallback: Standard /watch?v= URLs while strictly rejecting /shorts/
+            val watchUrlRegex = Regex("""/watch\?v=([a-zA-Z0-9_-]{11})""")
+            val watchMatches = watchUrlRegex.findAll(html).map { it.groupValues[1] }.distinct().toList()
+            for (vid in watchMatches) {
+                if (!html.contains("""/shorts/$vid""")) {
+                    youtubeTrailerCache[cacheKey] = vid
+                    return@withContext vid
+                }
+            }
+        } catch (_: Exception) {}
+        null
     }
 }

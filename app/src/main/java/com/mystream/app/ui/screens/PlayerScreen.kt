@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Audiotrack
@@ -51,6 +52,8 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Subtitles
 import android.content.pm.ActivityInfo
+import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -146,6 +149,8 @@ fun PlayerScreen(
 
     val isPlaying by playerManager.isPlaying.collectAsState()
     val isBuffering by playerManager.isBuffering.collectAsState()
+    val isArchiveActivating by playerManager.isArchiveActivating.collectAsState()
+    val archiveRetryCount by playerManager.archiveRetryCount.collectAsState()
     val currentPosition by playerManager.currentPosition.collectAsState()
     val duration by playerManager.duration.collectAsState()
     val bufferedPosition by playerManager.bufferedPosition.collectAsState()
@@ -184,6 +189,7 @@ fun PlayerScreen(
     val subtitleFocusRequester = remember { FocusRequester() }
     val aspectFocusRequester = remember { FocusRequester() }
     val speedFocusRequester = remember { FocusRequester() }
+    val externalPlayerFocusRequester = remember { FocusRequester() }
     val fullscreenFocusRequester = remember { FocusRequester() }
     val lockFocusRequester = remember { FocusRequester() }
 
@@ -195,6 +201,7 @@ fun PlayerScreen(
     val subtitleInteraction = remember { MutableInteractionSource() }
     val aspectInteraction = remember { MutableInteractionSource() }
     val speedInteraction = remember { MutableInteractionSource() }
+    val externalPlayerInteraction = remember { MutableInteractionSource() }
     val fullscreenInteraction = remember { MutableInteractionSource() }
     val lockInteraction = remember { MutableInteractionSource() }
 
@@ -206,6 +213,7 @@ fun PlayerScreen(
     val subtitleFocused by subtitleInteraction.collectIsFocusedAsState()
     val aspectFocused by aspectInteraction.collectIsFocusedAsState()
     val speedFocused by speedInteraction.collectIsFocusedAsState()
+    val externalPlayerFocused by externalPlayerInteraction.collectIsFocusedAsState()
     val fullscreenFocused by fullscreenInteraction.collectIsFocusedAsState()
     val lockFocused by lockInteraction.collectIsFocusedAsState()
 
@@ -241,6 +249,16 @@ fun PlayerScreen(
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         view.keepScreenOn = true
 
+        val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? android.app.UiModeManager
+        val isTv = uiModeManager?.currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION ||
+                context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
+
+        val isAutoRotateEnabled = try {
+            android.provider.Settings.System.getInt(context.contentResolver, android.provider.Settings.System.ACCELEROMETER_ROTATION, 0) == 1
+        } catch (_: Exception) {
+            false
+        }
+
         // Hide Status Bar (Notification Bar) & Bottom Navigation Bar (Home pill/buttons)
         if (window != null) {
             WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -249,8 +267,14 @@ fun PlayerScreen(
             insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        // Auto switch to landscape for cinema viewing
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        // Landscape playback: if system auto-rotate is disabled, lock to fixed landscape without tinkering with system auto-rotation!
+        if (!isTv) {
+            activity?.requestedOrientation = if (isAutoRotateEnabled) {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            }
+        }
 
         playerManager.applyTrackPreferences(
             preferredAudio = appSettings.preferredAudioLanguage,
@@ -262,11 +286,26 @@ fun PlayerScreen(
         onDispose {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             view.keepScreenOn = false
+
+            // 1. Return to portrait cleanly without activating or modifying system auto-rotation
+            if (!isTv) {
+                activity?.requestedOrientation = if (isAutoRotateEnabled) {
+                    ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                } else {
+                    ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                }
+            }
+
+            // 2. Restore normal system bars and reset transient behavior to default so insets are properly dispatched
             if (window != null) {
                 val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+                insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
                 insetsController.show(WindowInsetsCompat.Type.systemBars())
+                window.decorView.post {
+                    window.decorView.requestApplyInsets()
+                    (activity as? ComponentActivity)?.enableEdgeToEdge()
+                }
             }
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
     }
 
@@ -368,12 +407,20 @@ fun PlayerScreen(
     fun handleRewindNav(event: KeyEvent): Boolean {
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
+            Key.DirectionLeft -> {
+                triggerDebouncedNavSeek(-10L)
+                true
+            }
             Key.DirectionRight -> {
                 playPauseFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionDown -> {
                 seekbarFocusRequester.safeRequestFocus()
+                true
+            }
+            Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                triggerDebouncedNavSeek(-10L)
                 true
             }
             else -> false
@@ -383,12 +430,20 @@ fun PlayerScreen(
     fun handleForwardNav(event: KeyEvent): Boolean {
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
+            Key.DirectionRight -> {
+                triggerDebouncedNavSeek(10L)
+                true
+            }
             Key.DirectionLeft -> {
                 playPauseFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionDown -> {
                 seekbarFocusRequester.safeRequestFocus()
+                true
+            }
+            Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                triggerDebouncedNavSeek(10L)
                 true
             }
             else -> false
@@ -491,7 +546,7 @@ fun PlayerScreen(
                 true
             }
             Key.DirectionRight -> {
-                fullscreenFocusRequester.safeRequestFocus()
+                externalPlayerFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionUp -> {
@@ -502,7 +557,7 @@ fun PlayerScreen(
         }
     }
 
-    fun handleFullscreenNav(event: KeyEvent): Boolean {
+    fun handleExternalNav(event: KeyEvent): Boolean {
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
             Key.DirectionLeft -> {
@@ -517,6 +572,13 @@ fun PlayerScreen(
                 seekbarFocusRequester.safeRequestFocus()
                 true
             }
+            Key.DirectionCenter,
+            Key.Enter,
+            Key.NumPadEnter -> {
+                playerManager.pause()
+                com.mystream.app.ui.utils.ExternalPlayerHelper.launchExternalPlayer(context, item, currentPosition)
+                true
+            }
             else -> false
         }
     }
@@ -525,7 +587,7 @@ fun PlayerScreen(
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
             Key.DirectionLeft -> {
-                fullscreenFocusRequester.safeRequestFocus()
+                externalPlayerFocusRequester.safeRequestFocus()
                 true
             }
             Key.DirectionUp -> {
@@ -590,6 +652,17 @@ fun PlayerScreen(
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
 
+                // If playback error overlay is showing, let overlay buttons own DPAD completely
+                if (errorMessage != null) {
+                    if (keyEvent.key == Key.Back || keyEvent.key == Key.Escape) {
+                        onBack()
+                        return@onPreviewKeyEvent true
+                    }
+                    return@onPreviewKeyEvent false
+                }
+
+                showControls = true
+
                 // Let dialogs own DPAD navigation when open.
                 if (showAudioDialog || showSubtitleDialog || showAspectDialog || showSpeedDialog) {
                     return@onPreviewKeyEvent false
@@ -634,6 +707,23 @@ fun PlayerScreen(
                         } else {
                             false
                         }
+                    }
+
+                    Key.MediaFastForward -> {
+                        triggerDebouncedNavSeek(15L)
+                        true
+                    }
+
+                    Key.MediaRewind -> {
+                        triggerDebouncedNavSeek(-15L)
+                        true
+                    }
+
+                    Key.MediaPlayPause,
+                    Key.MediaPlay,
+                    Key.MediaPause -> {
+                        playerManager.togglePlayPause()
+                        true
                     }
 
                     Key.DirectionCenter,
@@ -734,8 +824,12 @@ fun PlayerScreen(
                     )
 
                     Text(
-                        text = if (bufferPercentage > 0) "Buffered $bufferPercentage%" else "Buffering stream...",
-                        color = TextSecondary,
+                        text = if (isArchiveActivating) {
+                            if (archiveRetryCount > 0) "❄️ Activating cold archive in cloud (Attempt $archiveRetryCount/180)..."
+                            else "❄️ Activating cold archive in cloud..."
+                        } else if (bufferPercentage > 0) "Buffered $bufferPercentage%"
+                        else "Buffering stream...",
+                        color = if (isArchiveActivating) Color(0xFF90CAF9) else TextSecondary,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -757,7 +851,7 @@ fun PlayerScreen(
                     modifier = Modifier.padding(32.dp)
                 ) {
                     Text(
-                        text = "⚠️ Playback Error",
+                        text = "Playback Error",
                         color = Color(0xFFFF4757),
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
@@ -766,7 +860,7 @@ fun PlayerScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = errorMessage ?: "Unable to stream this media. Please retry or pick another stream.",
+                        text = err,
                         color = TextSecondary,
                         fontSize = 14.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -793,6 +887,28 @@ fun PlayerScreen(
                                 .focusable(interactionSource = retryBtnInteraction)
                         ) {
                             Text(text = "Retry", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+
+                        val extBtnInteraction = remember { MutableInteractionSource() }
+                        val isExtBtnFocused by extBtnInteraction.collectIsFocusedAsState()
+
+                        androidx.compose.material3.Button(
+                            onClick = {
+                                com.mystream.app.ui.utils.ExternalPlayerHelper.launchExternalPlayer(context, item, currentPosition)
+                            },
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = if (isExtBtnFocused) FocusRingOrange else SecondaryCyan
+                            ),
+                            modifier = Modifier.focusable(interactionSource = extBtnInteraction)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(text = "External Player", color = Color.White, fontWeight = FontWeight.Bold)
                         }
 
                         val errorBtnInteraction = remember { MutableInteractionSource() }
@@ -838,7 +954,7 @@ fun PlayerScreen(
 
         // Controls HUD Overlay (State-of-the-Art Floating Glass Architecture)
         AnimatedVisibility(
-            visible = showControls && !isControlsLocked,
+            visible = showControls && !isControlsLocked && errorMessage == null,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
@@ -906,32 +1022,64 @@ fun PlayerScreen(
                         }
                     }
 
-                    if (onEnterPiP != null) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0x4D000000))
-                                .border(1.dp, Color(0x33FFFFFF), CircleShape)
-                                .clickable(onClick = onEnterPiP),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PictureInPicture,
-                                contentDescription = "Picture-in-Picture",
-                                tint = SecondaryCyan,
-                                modifier = Modifier.size(19.dp)
-                            )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Current Wall-Clock Time Pill (e.g. 8:35 PM)
+                        var currentClockTime by remember { mutableStateOf("") }
+                        LaunchedEffect(showControls) {
+                            while (showControls) {
+                                currentClockTime = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date())
+                                kotlinx.coroutines.delay(1000)
+                            }
+                        }
+                        if (currentClockTime.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color(0x4D000000))
+                                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp))
+                                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = currentClockTime,
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        if (onEnterPiP != null) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x4D000000))
+                                    .border(1.dp, Color(0x33FFFFFF), CircleShape)
+                                    .clickable(onClick = onEnterPiP),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PictureInPicture,
+                                    contentDescription = "Picture-in-Picture",
+                                    tint = SecondaryCyan,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
                         }
                     }
                 }
 
                 // Center Play/Pause & Fast-Seek Cluster with Animations
-                Row(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalArrangement = Arrangement.spacedBy(32.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (errorMessage == null) {
+                    Row(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalArrangement = Arrangement.spacedBy(32.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                     IconButton(
                         onClick = { playerManager.seekBack(10L) },
                         interactionSource = rewindInteraction,
@@ -1030,6 +1178,7 @@ fun PlayerScreen(
                         )
                     }
                 }
+            }
 
                 // Bottom Floating HUD (Completely Borderless & Transparent)
                 Column(
@@ -1039,22 +1188,30 @@ fun PlayerScreen(
                         .padding(horizontal = 32.dp, vertical = 24.dp)
                 ) {
                     // Timeline Seekbar Row
+                    val currentMs = if (isUserSeeking) sliderPosition.toLong() else currentPosition
+                    val totalMs = if (duration > 0) duration else 0L
+                    val remainingMs = (totalMs - currentMs).coerceAtLeast(0L)
+                    val endClockTime = remember(currentMs, totalMs) {
+                        if (totalMs > 0) {
+                            val finishTimeMs = System.currentTimeMillis() + remainingMs
+                            java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(finishTimeMs))
+                        } else ""
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        val currentMs = if (isUserSeeking) sliderPosition.toLong() else currentPosition
                         Text(
-                            text = formatDuration(currentMs),
+                            text = "${formatDuration(currentMs)} / ${formatDuration(totalMs)}",
                             color = TextPrimary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
 
-                        val remainingMs = (duration - currentMs).coerceAtLeast(0L)
                         Text(
-                            text = "-${formatDuration(remainingMs)}",
+                            text = if (endClockTime.isNotBlank()) "Ends at $endClockTime (-${formatDuration(remainingMs)})" else "-${formatDuration(remainingMs)}",
                             color = TextSecondary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
@@ -1244,41 +1401,36 @@ fun PlayerScreen(
                             )
                         }
 
-                        // 5. Fullscreen / Orientation Toggle Pill
+                        // 5. External Player Pill
                         Row(
                             modifier = Modifier
-                                .focusRequester(fullscreenFocusRequester)
-                                .focusable(interactionSource = fullscreenInteraction)
-                                .onPreviewKeyEvent(::handleFullscreenNav)
+                                .focusRequester(externalPlayerFocusRequester)
+                                .focusable(interactionSource = externalPlayerInteraction)
+                                .onPreviewKeyEvent(::handleExternalNav)
                                 .clip(RoundedCornerShape(20.dp))
-                                .background(if (fullscreenFocused) FocusRingOrange.copy(alpha = 0.35f) else Color(0x4D000000))
+                                .background(if (externalPlayerFocused) FocusRingOrange.copy(alpha = 0.35f) else Color(0x4D000000))
                                 .border(
-                                    if (fullscreenFocused) 2.dp else 1.dp,
-                                    if (fullscreenFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                    if (externalPlayerFocused) 2.dp else 1.dp,
+                                    if (externalPlayerFocused) FocusRingOrange else SecondaryCyan.copy(alpha = 0.5f),
                                     RoundedCornerShape(20.dp)
                                 )
-                                .clickable(interactionSource = fullscreenInteraction, indication = null) {
-                                    isLandscape = !isLandscape
-                                    val activity = context as? Activity
-                                    if (isLandscape) {
-                                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                                    } else {
-                                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                    }
+                                .clickable(interactionSource = externalPlayerInteraction, indication = null) {
+                                    playerManager.pause()
+                                    com.mystream.app.ui.utils.ExternalPlayerHelper.launchExternalPlayer(context, item, currentPosition)
                                 }
                                 .padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
-                                imageVector = if (isLandscape) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                                contentDescription = null,
-                                tint = if (fullscreenFocused) FocusRingOrange else Color.White,
+                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                contentDescription = "External Player",
+                                tint = if (externalPlayerFocused) FocusRingOrange else SecondaryCyan,
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                text = if (isLandscape) "Landscape" else "Portrait",
-                                color = if (fullscreenFocused) FocusRingOrange else TextPrimary,
+                                text = "External",
+                                color = if (externalPlayerFocused) FocusRingOrange else TextPrimary,
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold
                             )

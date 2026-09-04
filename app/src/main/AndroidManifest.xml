@@ -25,6 +25,20 @@
         android:name="android.hardware.microphone"
         android:required="false" />
 
+    <!-- Package visibility queries for external players & YouTube -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <package android:name="com.google.android.youtube.tv" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="org.smarttube.stable" />
+        <package android:name="org.smarttube.beta" />
+        <package android:name="com.teamsmart.videomanager.tv" />
+        <package android:name="org.schabi.newpipe" />
+    </queries>
+
     <application
         android:name=".MyStreamApplication"
         android:allowBackup="true"

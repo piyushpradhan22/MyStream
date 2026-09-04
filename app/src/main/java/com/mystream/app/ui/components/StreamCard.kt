@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -67,6 +68,7 @@ fun StreamCard(
     onClick: () -> Unit,
     onRestart: (() -> Unit)? = null,
     onMagnetStream: (() -> Unit)? = null,
+    onExternalPlayer: (() -> Unit)? = null,
     onUp: (() -> Unit)? = null,
     actionButtonText: String = "⚡ Resolve",
     modifier: Modifier = Modifier
@@ -74,16 +76,19 @@ fun StreamCard(
     val cardFocusRequester = externalFocusRequester ?: remember { FocusRequester() }
     val magnetFocusRequester = remember { FocusRequester() }
     val restartFocusRequester = remember { FocusRequester() }
+    val extPlayerFocusRequester = remember { FocusRequester() }
 
     val cardInteractionSource = remember { MutableInteractionSource() }
     val restartInteractionSource = remember { MutableInteractionSource() }
     val magnetInteractionSource = remember { MutableInteractionSource() }
+    val extPlayerInteractionSource = remember { MutableInteractionSource() }
 
     val isCardFocused by cardInteractionSource.collectIsFocusedAsState()
     val isRestartFocused by restartInteractionSource.collectIsFocusedAsState()
     val isMagnetFocused by magnetInteractionSource.collectIsFocusedAsState()
+    val isExtPlayerFocused by extPlayerInteractionSource.collectIsFocusedAsState()
 
-    val isAnyFocused = isCardFocused || isMagnetFocused || isRestartFocused
+    val isAnyFocused = isCardFocused || isMagnetFocused || isRestartFocused || isExtPlayerFocused
     val borderColor = if (isAnyFocused) FocusRingOrange else GlassBorder
     val bgColor = if (isAnyFocused) Color(0xFF151C2C) else GlassSurface
 
@@ -123,6 +128,9 @@ fun StreamCard(
                                 true
                             } else if (onRestart != null && !isResolving) {
                                 restartFocusRequester.safeRequestFocus()
+                                true
+                            } else if (onExternalPlayer != null && !isResolving) {
+                                extPlayerFocusRequester.safeRequestFocus()
                                 true
                             } else false
                         }
@@ -199,15 +207,13 @@ fun StreamCard(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(5.dp))
-                            .background(Color(0xFFE65100))
+                            .background(Color(0xFFE65100).copy(alpha = 0.35f))
                             .border(0.5.dp, Color(0xFFFF9800), RoundedCornerShape(5.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "🇮🇳 HINDI",
-                            color = Color.White,
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.ExtraBold
+                            text = "🇮🇳",
+                            fontSize = 10.5.sp
                         )
                     }
                 }
@@ -226,6 +232,28 @@ fun StreamCard(
                             color = EmeraldNeon,
                             fontSize = 9.5.sp,
                             fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Cloud Archive Tier Badge (ARC)
+                val isArchive = stream.isArchive ||
+                        stream.name?.contains("ARC", ignoreCase = true) == true ||
+                        stream.quality.contains("ARC", ignoreCase = true) ||
+                        stream.title?.contains("ARC", ignoreCase = true) == true
+                if (isArchive) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(Color(0xFF0D47A1).copy(alpha = 0.65f))
+                            .border(0.5.dp, Color(0xFF42A5F5), RoundedCornerShape(5.dp))
+                            .padding(horizontal = 5.5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "❄️ ARC",
+                            color = Color(0xFF90CAF9),
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.ExtraBold
                         )
                     }
                 }
@@ -276,7 +304,7 @@ fun StreamCard(
         }
 
         // 2. Action Buttons
-        if (isResolving || onMagnetStream != null || onRestart != null) {
+        if (isResolving || onMagnetStream != null || onRestart != null || onExternalPlayer != null) {
             Spacer(modifier = Modifier.width(10.dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -314,6 +342,9 @@ fun StreamCard(
                                         if (onRestart != null) {
                                             restartFocusRequester.safeRequestFocus()
                                             true
+                                        } else if (onExternalPlayer != null) {
+                                            extPlayerFocusRequester.safeRequestFocus()
+                                            true
                                         } else false
                                     }
 
@@ -350,61 +381,130 @@ fun StreamCard(
                         modifier = Modifier.size(22.dp),
                         strokeWidth = 2.dp
                     )
-                } else if (onRestart != null) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(if (isRestartFocused) FocusRingOrange.copy(alpha = 0.25f) else SurfaceDark)
-                            .border(
-                                if (isRestartFocused) 2.dp else 1.dp,
-                                if (isRestartFocused) FocusRingOrange else GlassBorderStrong,
-                                CircleShape
-                            )
-                            .focusRequester(restartFocusRequester)
-                            .onPreviewKeyEvent { keyEvent ->
-                                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                when (keyEvent.key) {
-                                    Key.DirectionCenter,
-                                    Key.Enter,
-                                    Key.NumPadEnter,
-                                    Key.Spacebar -> {
-                                        onRestart()
-                                        true
-                                    }
-
-                                    Key.DirectionLeft -> {
-                                        if (onMagnetStream != null && !isResolving) {
-                                            magnetFocusRequester.safeRequestFocus()
-                                        } else {
-                                            cardFocusRequester.safeRequestFocus()
-                                        }
-                                        true
-                                    }
-
-                                    Key.DirectionUp -> {
-                                        if (onUp != null) {
-                                            onUp()
+                } else {
+                    if (onRestart != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(if (isRestartFocused) FocusRingOrange.copy(alpha = 0.25f) else SurfaceDark)
+                                .border(
+                                    if (isRestartFocused) 2.dp else 1.dp,
+                                    if (isRestartFocused) FocusRingOrange else GlassBorderStrong,
+                                    CircleShape
+                                )
+                                .focusRequester(restartFocusRequester)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    when (keyEvent.key) {
+                                        Key.DirectionCenter,
+                                        Key.Enter,
+                                        Key.NumPadEnter,
+                                        Key.Spacebar -> {
+                                            onRestart()
                                             true
-                                        } else false
-                                    }
+                                        }
 
-                                    else -> false
+                                        Key.DirectionLeft -> {
+                                            if (onMagnetStream != null && !isResolving) {
+                                                magnetFocusRequester.safeRequestFocus()
+                                            } else {
+                                                cardFocusRequester.safeRequestFocus()
+                                            }
+                                            true
+                                        }
+
+                                        Key.DirectionRight -> {
+                                            if (onExternalPlayer != null) {
+                                                extPlayerFocusRequester.safeRequestFocus()
+                                                true
+                                            } else false
+                                        }
+
+                                        Key.DirectionUp -> {
+                                            if (onUp != null) {
+                                                onUp()
+                                                true
+                                            } else false
+                                        }
+
+                                        else -> false
+                                    }
                                 }
-                            }
-                            .clickable(
-                                interactionSource = restartInteractionSource,
-                                indication = null,
-                                onClick = onRestart
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Replay,
-                            contentDescription = "Restart from Beginning",
-                            tint = if (isRestartFocused) FocusRingOrange else TextSecondary,
-                            modifier = Modifier.size(18.dp)
-                        )
+                                .clickable(
+                                    interactionSource = restartInteractionSource,
+                                    indication = null,
+                                    onClick = onRestart
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Replay,
+                                contentDescription = "Restart from Beginning",
+                                tint = if (isRestartFocused) FocusRingOrange else TextSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    if (onExternalPlayer != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(if (isExtPlayerFocused) FocusRingOrange.copy(alpha = 0.25f) else SurfaceDark)
+                                .border(
+                                    if (isExtPlayerFocused) 2.dp else 1.dp,
+                                    if (isExtPlayerFocused) FocusRingOrange else GlassBorderStrong,
+                                    CircleShape
+                                )
+                                .focusRequester(extPlayerFocusRequester)
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    when (keyEvent.key) {
+                                        Key.DirectionCenter,
+                                        Key.Enter,
+                                        Key.NumPadEnter,
+                                        Key.Spacebar -> {
+                                            onExternalPlayer()
+                                            true
+                                        }
+
+                                        Key.DirectionLeft -> {
+                                            if (onRestart != null) {
+                                                restartFocusRequester.safeRequestFocus()
+                                            } else if (onMagnetStream != null && !isResolving) {
+                                                magnetFocusRequester.safeRequestFocus()
+                                            } else {
+                                                cardFocusRequester.safeRequestFocus()
+                                            }
+                                            true
+                                        }
+
+                                        Key.DirectionUp -> {
+                                            if (onUp != null) {
+                                                onUp()
+                                                true
+                                            } else false
+                                        }
+
+                                        else -> false
+                                    }
+                                }
+                                .clickable(
+                                    interactionSource = extPlayerInteractionSource,
+                                    indication = null,
+                                    onClick = onExternalPlayer
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                contentDescription = "Play in External Player",
+                                tint = if (isExtPlayerFocused) FocusRingOrange else com.mystream.app.ui.theme.SecondaryCyan,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
                     }
                 }
             }

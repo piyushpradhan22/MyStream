@@ -47,13 +47,13 @@ class MyStreamApplication : Application(), SingletonImageLoader.Factory {
             }
             .memoryCache {
                 MemoryCache.Builder()
-                    .maxSizePercent(context, 0.15) // Lean 15% memory limit for TV devices
+                    .maxSizePercent(context, 0.15)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("image_cache").toOkioPath())
-                    .maxSizeBytes(60L * 1024 * 1024) // 60MB disk cache
+                    .maxSizeBytes(80L * 1024 * 1024) // 80MB disk cache
                     .build()
             }
             .crossfade(true)
@@ -67,7 +67,7 @@ class MyStreamApplication : Application(), SingletonImageLoader.Factory {
         super.onTrimMemory(level)
         if (level >= TRIM_MEMORY_BACKGROUND) {
             imageLoaderInstance?.memoryCache?.clear()
-        } else if (level >= TRIM_MEMORY_RUNNING_LOW) {
+        } else if (level >= TRIM_MEMORY_UI_HIDDEN) {
             imageLoaderInstance?.memoryCache?.trimToSize((imageLoaderInstance?.memoryCache?.maxSize ?: 0) / 2)
         }
     }

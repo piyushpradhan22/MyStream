@@ -1,5 +1,6 @@
 package com.mystream.app.ui.components
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,7 +26,6 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -69,7 +69,10 @@ fun HeroBanner(
     modifier: Modifier = Modifier,
     playFocusRequester: FocusRequester? = null,
     onNavigateDown: (() -> Unit)? = null,
-    onDetailsClick: (() -> Unit)? = null,
+    onNavigateLeft: (() -> Unit)? = null,
+    onNavigateRight: (() -> Unit)? = null,
+    itemCount: Int = 1,
+    currentIndex: Int = 0,
     height: Int = 360
 ) {
     Box(
@@ -81,8 +84,15 @@ fun HeroBanner(
         // Backdrop Image
         val imageUrl = item.background ?: item.poster
         if (!imageUrl.isNullOrBlank()) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val heroImageRequest = remember(imageUrl) {
+                coil3.request.ImageRequest.Builder(context)
+                    .data(imageUrl)
+                    .size(coil3.size.Size(1280, 720))
+                    .build()
+            }
             AsyncImage(
-                model = imageUrl,
+                model = heroImageRequest,
                 contentDescription = item.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
@@ -218,14 +228,13 @@ fun HeroBanner(
             val playInteractionSource = remember { MutableInteractionSource() }
             val isPlayFocused by playInteractionSource.collectIsFocusedAsState()
 
-            val detailsInteractionSource = remember { MutableInteractionSource() }
-            val isDetailsFocused by detailsInteractionSource.collectIsFocusedAsState()
-
-            // Action Buttons
+            // Action Button and Indicator Dots Row
             Row(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Details Action Button
                 Button(
                     onClick = onPlayClick,
                     interactionSource = playInteractionSource,
@@ -237,9 +246,28 @@ fun HeroBanner(
                     modifier = Modifier
                         .then(if (playFocusRequester != null) Modifier.focusRequester(playFocusRequester) else Modifier)
                         .onPreviewKeyEvent { keyEvent ->
-                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown && onNavigateDown != null) {
-                                onNavigateDown()
-                                true
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                when (keyEvent.key) {
+                                    Key.DirectionDown -> {
+                                        if (onNavigateDown != null) {
+                                            onNavigateDown()
+                                            true
+                                        } else false
+                                    }
+                                    Key.DirectionLeft -> {
+                                        if (onNavigateLeft != null) {
+                                            onNavigateLeft()
+                                            true
+                                        } else false
+                                    }
+                                    Key.DirectionRight -> {
+                                        if (onNavigateRight != null) {
+                                            onNavigateRight()
+                                            true
+                                        } else false
+                                    }
+                                    else -> false
+                                }
                             } else false
                         }
                         .shadow(
@@ -254,43 +282,41 @@ fun HeroBanner(
                         )
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play",
-                        modifier = Modifier.size(22.dp)
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Details",
+                        modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Play Now",
+                        text = "Details",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.5.sp
                     )
                 }
 
-                if (onDetailsClick != null) {
-                    OutlinedButton(
-                        onClick = onDetailsClick,
-                        interactionSource = detailsInteractionSource,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .background(GlassSurface, RoundedCornerShape(12.dp))
-                            .then(
-                                if (isDetailsFocused) Modifier.border(2.5.dp, FocusRingOrange, RoundedCornerShape(12.dp))
-                                else Modifier.border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                            )
+                // Pager Indicator Dots (indicating multiple hero items)
+                if (itemCount > 1) {
+                    val displayCount = minOf(itemCount, 8)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 12.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = "Details",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Details",
-                            color = TextPrimary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp
-                        )
+                        repeat(displayCount) { index ->
+                            val isSelected = index == (currentIndex % displayCount)
+                            val dotWidth by animateDpAsState(
+                                targetValue = if (isSelected) 18.dp else 6.dp,
+                                label = "dotW"
+                            )
+                            val dotColor = if (isSelected) PrimaryNeon else Color(0x55FFFFFF)
+                            Box(
+                                modifier = Modifier
+                                    .height(6.dp)
+                                    .width(dotWidth)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(dotColor)
+                            )
+                        }
                     }
                 }
             }

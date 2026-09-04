@@ -122,8 +122,15 @@ fun PosterCard(
                 .then(borderModifier)
         ) {
             if (!item.poster.isNullOrBlank()) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val imageRequest = remember(item.poster) {
+                    coil3.request.ImageRequest.Builder(context)
+                        .data(item.poster)
+                        .size(coil3.size.Size(280, 420))
+                        .build()
+                }
                 AsyncImage(
-                    model = item.poster,
+                    model = imageRequest,
                     contentDescription = item.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
