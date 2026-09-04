@@ -52,6 +52,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -149,6 +150,18 @@ fun HomeScreen(
     var featuredItem by remember { mutableStateOf<StremioMetaPreview?>(null) }
     var featuredPool by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
     var featuredIndex by remember { mutableIntStateOf(0) }
+    var heroAutoAdvanceTrigger by remember { mutableLongStateOf(0L) }
+
+    // Automatic smooth rotation of suggestion cards every 6.5s
+    LaunchedEffect(featuredPool, heroAutoAdvanceTrigger) {
+        if (featuredPool.size > 1) {
+            while (true) {
+                delay(6500)
+                featuredIndex = (featuredIndex + 1) % featuredPool.size
+                featuredItem = featuredPool[featuredIndex]
+            }
+        }
+    }
     var isLoading by remember { mutableStateOf(true) }
     var reloadTrigger by remember { mutableIntStateOf(0) }
     var loadError by remember { mutableStateOf<String?>(null) }
@@ -327,6 +340,11 @@ fun HomeScreen(
                         HeroBanner(
                             item = hero,
                             playFocusRequester = heroPlayFocusRequester,
+                            onNavigateUp = {
+                                try {
+                                    searchFocusRequester.requestFocus()
+                                } catch (_: Exception) {}
+                            },
                             onNavigateDown = {
                                 try {
                                     if (continueWatchingList.isNotEmpty()) {
@@ -344,12 +362,21 @@ fun HomeScreen(
                                 if (featuredPool.size > 1) {
                                     featuredIndex = (featuredIndex - 1 + featuredPool.size) % featuredPool.size
                                     featuredItem = featuredPool[featuredIndex]
+                                    heroAutoAdvanceTrigger++
                                 }
                             },
                             onNavigateRight = {
                                 if (featuredPool.size > 1) {
                                     featuredIndex = (featuredIndex + 1) % featuredPool.size
                                     featuredItem = featuredPool[featuredIndex]
+                                    heroAutoAdvanceTrigger++
+                                }
+                            },
+                            onSelectIndex = { targetIdx ->
+                                if (targetIdx in featuredPool.indices) {
+                                    featuredIndex = targetIdx
+                                    featuredItem = featuredPool[targetIdx]
+                                    heroAutoAdvanceTrigger++
                                 }
                             },
                             itemCount = featuredPool.size,

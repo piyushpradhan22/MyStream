@@ -253,12 +253,6 @@ fun PlayerScreen(
         val isTv = uiModeManager?.currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION ||
                 context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
 
-        val isAutoRotateEnabled = try {
-            android.provider.Settings.System.getInt(context.contentResolver, android.provider.Settings.System.ACCELEROMETER_ROTATION, 0) == 1
-        } catch (_: Exception) {
-            false
-        }
-
         // Hide Status Bar (Notification Bar) & Bottom Navigation Bar (Home pill/buttons)
         if (window != null) {
             WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -267,13 +261,9 @@ fun PlayerScreen(
             insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        // Landscape playback: if system auto-rotate is disabled, lock to fixed landscape without tinkering with system auto-rotation!
+        // Automatic Landscape playback for video on mobile (without altering or querying system settings)
         if (!isTv) {
-            activity?.requestedOrientation = if (isAutoRotateEnabled) {
-                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            } else {
-                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            }
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         }
 
         playerManager.applyTrackPreferences(
@@ -287,13 +277,9 @@ fun PlayerScreen(
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             view.keepScreenOn = false
 
-            // 1. Return to portrait cleanly without activating or modifying system auto-rotation
+            // 1. Return to portrait cleanly on mobile without touching system settings
             if (!isTv) {
-                activity?.requestedOrientation = if (isAutoRotateEnabled) {
-                    ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                } else {
-                    ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                }
+                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             }
 
             // 2. Restore normal system bars and reset transient behavior to default so insets are properly dispatched

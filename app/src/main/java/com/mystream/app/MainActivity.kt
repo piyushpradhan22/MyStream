@@ -20,6 +20,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.app.UiModeManager
+import android.content.Context
+import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -56,8 +60,17 @@ class MainActivity : ComponentActivity() {
         globalNavController?.handleDeepLink(intent)
     }
 
+    private fun isTvDevice(): Boolean {
+        val uiModeManager = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        return uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+                packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!isTvDevice()) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
         enableEdgeToEdge()
         app = application as MyStreamApplication
 
@@ -247,6 +260,26 @@ class MainActivity : ComponentActivity() {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         isInPiPMode = isInPictureInPictureMode
+        if (!isTvDevice()) {
+            requestedOrientation = if (isInPictureInPictureMode) {
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            } else if (activePlaybackItem != null) {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!isTvDevice()) {
+            requestedOrientation = if (activePlaybackItem != null && !isInPiPMode) {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+        }
     }
 
     override fun onUserLeaveHint() {
@@ -267,6 +300,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        if (!isTvDevice() && !isInPiPMode) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
         if (!isInPiPMode) {
             app.playerManager.pause()
             Log.d(TAG, "Activity onStop: paused player")
