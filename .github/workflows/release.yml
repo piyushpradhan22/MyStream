@@ -34,7 +34,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Debug & Release APKs
-        run: ./gradlew assembleDebug assembleRelease
+        run: ./gradlew assembleDebug assembleRelease --stacktrace
 
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2

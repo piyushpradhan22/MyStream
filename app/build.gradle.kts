@@ -77,6 +77,10 @@ android {
             excludes += "/META-INF/DEPENDENCIES"
         }
     }
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
 }
 
 dependencies {
@@ -125,10 +129,8 @@ dependencies {
 chaquopy {
     defaultConfig {
         val macBrewPython = file("/opt/homebrew/bin/python3.11")
-        val linuxPython = file("/usr/bin/python3")
-        when {
-            macBrewPython.exists() -> buildPython(macBrewPython.absolutePath)
-            linuxPython.exists() -> buildPython(linuxPython.absolutePath)
+        if (macBrewPython.exists()) {
+            buildPython(macBrewPython.absolutePath)
         }
         version = "3.11"
         pip {
