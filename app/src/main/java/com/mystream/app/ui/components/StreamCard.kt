@@ -218,18 +218,20 @@ fun StreamCard(
                     }
                 }
 
-                // Provider Name (e.g. PP)
+                // Provider Name (e.g. PP, HF)
                 stream.providerName?.let { provider ->
+                    val isHf = provider.equals("HF", ignoreCase = true) || provider.contains("HuggingFace", ignoreCase = true)
+                    val isPp = provider.equals("PP", ignoreCase = true) || provider.contains("PikPak", ignoreCase = true)
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(5.dp))
-                            .background(Color(0x2AFFFFFF))
-                            .border(0.5.dp, GlassBorder, RoundedCornerShape(5.dp))
+                            .background(if (isHf) Color(0x33FFD54F) else Color(0x2AFFFFFF))
+                            .border(0.5.dp, if (isHf) Color(0xFFFFD54F) else GlassBorder, RoundedCornerShape(5.dp))
                             .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = if (provider.equals("PP", ignoreCase = true) || provider.contains("PikPak", ignoreCase = true)) "PP" else provider,
-                            color = EmeraldNeon,
+                            text = if (isHf) "⚡ HF DIRECT" else if (isPp) "PP" else provider,
+                            color = if (isHf) Color(0xFFFFE082) else EmeraldNeon,
                             fontSize = 9.5.sp,
                             fontWeight = FontWeight.Bold
                         )

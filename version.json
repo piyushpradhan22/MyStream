@@ -1,6 +1,6 @@
 {
-  "versionCode": 15,
-  "versionName": "1.0.14",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.14/app-universal-release.apk",
-  "changelog": "• 50% App Size Reduction: Release APK reduced from 51 MB to 26 MB (arm64) and universal from 98 MB to 32 MB\n• Pure PikPak Python Cloud Streaming: Fast and reliable stream resolution via pikpakapi\n• Orientation & Auto-Rotate Fix: Restores system orientation cleanly without altering auto-rotate settings\n• Safe Status Bar Padding: Top search bar and elements protected from overlapping status bar / notch\n• Ultra-lightweight memory & buffer optimizations for smooth playback"
+  "versionCode": 16,
+  "versionName": "1.0.15",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.15/app-universal-release.apk",
+  "changelog": "• ⚡ HuggingFace Direct Streaming: Added instant, unthrottled streaming directly from HuggingFace dataset AWS CloudFront CDN with 0 waiting time\n• ⚡ HuggingFace Direct Home Catalog: Dedicated home catalog row showcasing the latest high-speed movies & series with full poster art and 'See All' grid browsing\n• ⚡ Instant HF Stream Badges: Distinctive amber/gold [⚡ HF DIRECT] badges on stream cards in 4K UHD and 1080p FHD\n• 🔍 Integrated Dataset Search: HuggingFace catalog items are seamlessly included in global search results\n• 📱 UI & Orientation Stability: Maintained rock-solid portrait lock during app browsing, smooth landscape playback, and intact system auto-rotate settings"
 }

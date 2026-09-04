@@ -130,7 +130,18 @@ fun SearchScreen(
                 // 1. Instant local search in Indian catalog if query matches
                 val localMatches = repository.searchIndianCatalog(clean)
 
-                // 2. Fetch Cinemeta movie and series catalogs concurrently
+                // 2. Search HuggingFace direct streams dataset in Postgres
+                val hfDeferred = async(Dispatchers.IO) {
+                    try {
+                        repository.searchHfCatalog(clean)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+
+                // 3. Fetch Cinemeta movie and series catalogs concurrently
                 val movieDeferred = async(Dispatchers.IO) {
                     try {
                         repository.fetchCatalog("movie", "top", search = clean).metas
@@ -151,10 +162,11 @@ fun SearchScreen(
                     }
                 }
 
+                val hfResults = hfDeferred.await()
                 val movieResults = movieDeferred.await()
                 val seriesResults = seriesDeferred.await()
 
-                val combined = (localMatches + movieResults + seriesResults).distinctBy { it.id }
+                val combined = (hfResults + localMatches + movieResults + seriesResults).distinctBy { it.id }
                 if (isActive) {
                     rawResults = combined
                 }

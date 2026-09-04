@@ -515,6 +515,114 @@ object PostgresAccountFetcher {
             Log.w(TAG, "clearPikpakV2Record error", e)
         }
     }
+
+    suspend fun getHfTorRecords(postgresUrl: String, imdbId: String): List<HfTorRecord> = withContext(Dispatchers.IO) {
+        if (postgresUrl.isBlank() || imdbId.isBlank()) return@withContext emptyList()
+        val list = mutableListOf<HfTorRecord>()
+        try {
+            val config = parseUrl(postgresUrl)
+            val safeId = imdbId.replace("'", "''")
+            val query = "SELECT imdb_id, name, url, size, file_name, hash, time FROM hftor WHERE imdb_id = '$safeId' ORDER BY time DESC"
+            val rows = executePgQuery(config, query)
+            for (r in rows) {
+                if (r.size >= 7 && r[2].isNotBlank()) {
+                    list.add(
+                        HfTorRecord(
+                            imdbId = r[0],
+                            name = r[1],
+                            url = r[2],
+                            size = r[3].toLongOrNull() ?: 0L,
+                            fileName = r[4],
+                            hash = r[5],
+                            time = r[6].toLongOrNull() ?: 0L
+                        )
+                    )
+                }
+            }
+            Log.i(TAG, "Found ${list.size} HuggingFace streams in hftor table for $imdbId")
+        } catch (e: Exception) {
+            Log.w(TAG, "getHfTorRecords error for $imdbId", e)
+        }
+        list
+    }
+
+    suspend fun getHfCatalog(postgresUrl: String, limit: Int = 30, offset: Int = 0): List<HfTorRecord> = withContext(Dispatchers.IO) {
+        if (postgresUrl.isBlank()) return@withContext emptyList()
+        val list = mutableListOf<HfTorRecord>()
+        try {
+            val config = parseUrl(postgresUrl)
+            val query = """
+                SELECT imdb_id, name, url, size, file_name, hash, time
+                FROM (
+                    SELECT DISTINCT ON (SPLIT_PART(imdb_id, ':', 1)) imdb_id, name, url, size, file_name, hash, time
+                    FROM hftor
+                    ORDER BY SPLIT_PART(imdb_id, ':', 1), time DESC
+                ) sub
+                ORDER BY time DESC
+                LIMIT $limit OFFSET $offset
+            """.trimIndent()
+            val rows = executePgQuery(config, query)
+            for (r in rows) {
+                if (r.size >= 7 && r[2].isNotBlank()) {
+                    list.add(
+                        HfTorRecord(
+                            imdbId = r[0],
+                            name = r[1],
+                            url = r[2],
+                            size = r[3].toLongOrNull() ?: 0L,
+                            fileName = r[4],
+                            hash = r[5],
+                            time = r[6].toLongOrNull() ?: 0L
+                        )
+                    )
+                }
+            }
+            Log.i(TAG, "Loaded ${list.size} items from hftor catalog (offset=$offset, limit=$limit)")
+        } catch (e: Exception) {
+            Log.w(TAG, "getHfCatalog error", e)
+        }
+        list
+    }
+
+    suspend fun searchHfTor(postgresUrl: String, query: String, limit: Int = 20): List<HfTorRecord> = withContext(Dispatchers.IO) {
+        if (postgresUrl.isBlank() || query.isBlank()) return@withContext emptyList()
+        val list = mutableListOf<HfTorRecord>()
+        try {
+            val config = parseUrl(postgresUrl)
+            val safeQ = query.lowercase().replace("'", "''")
+            val sql = """
+                SELECT imdb_id, name, url, size, file_name, hash, time
+                FROM (
+                    SELECT DISTINCT ON (SPLIT_PART(imdb_id, ':', 1)) imdb_id, name, url, size, file_name, hash, time
+                    FROM hftor
+                    WHERE LOWER(name) LIKE '%$safeQ%' OR LOWER(file_name) LIKE '%$safeQ%'
+                    ORDER BY SPLIT_PART(imdb_id, ':', 1), time DESC
+                ) sub
+                ORDER BY time DESC
+                LIMIT $limit
+            """.trimIndent()
+            val rows = executePgQuery(config, sql)
+            for (r in rows) {
+                if (r.size >= 7 && r[2].isNotBlank()) {
+                    list.add(
+                        HfTorRecord(
+                            imdbId = r[0],
+                            name = r[1],
+                            url = r[2],
+                            size = r[3].toLongOrNull() ?: 0L,
+                            fileName = r[4],
+                            hash = r[5],
+                            time = r[6].toLongOrNull() ?: 0L
+                        )
+                    )
+                }
+            }
+            Log.i(TAG, "searchHfTor found ${list.size} items for '$query'")
+        } catch (e: Exception) {
+            Log.w(TAG, "searchHfTor error for '$query'", e)
+        }
+        list
+    }
 }
 
 data class PikPakTorrentRecord(
@@ -526,3 +634,14 @@ data class PikPakTorrentRecord(
     val size: Double,
     val filename: String
 )
+
+data class HfTorRecord(
+    val imdbId: String,
+    val name: String,
+    val url: String,
+    val size: Long,
+    val fileName: String,
+    val hash: String,
+    val time: Long
+)
+

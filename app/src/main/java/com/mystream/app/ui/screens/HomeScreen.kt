@@ -134,11 +134,13 @@ fun HomeScreen(
     val row3FirstItemFR = remember { FocusRequester() }
     val row4FirstItemFR = remember { FocusRequester() }
     val row5FirstItemFR = remember { FocusRequester() }
+    val rowHfFirstItemFR = remember { FocusRequester() }
 
     val rowScrollStates = remember { mutableMapOf<String, androidx.compose.foundation.lazy.LazyListState>() }
     val continueWatchingListState = rememberLazyListState()
     val watchlistListState = rememberLazyListState()
 
+    var hfCatalogItems by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
     var indianCategories by remember { mutableStateOf<List<Pair<String, List<StremioMetaPreview>>>>(emptyList()) }
 
     var topMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
@@ -285,6 +287,18 @@ fun HomeScreen(
                         android.util.Log.e("HomeScreen", "Error loading comedy series", e)
                     }
                 }
+
+                launch(Dispatchers.IO) {
+                    try {
+                        val hfRes = repository.fetchHfCatalog(skip = 0, limit = 30)
+                        hfCatalogItems = hfRes.metas
+                        if (featuredItem == null && hfRes.metas.isNotEmpty()) {
+                            featuredItem = hfRes.metas.firstOrNull()
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("HomeScreen", "Error loading HuggingFace catalog", e)
+                    }
+                }
             }
 
             // Build randomized pool of featured cards once at boot and keep fixed throughout the session
@@ -293,7 +307,7 @@ fun HomeScreen(
                 featuredPool = existingBootPool
                 featuredItem = existingBootPool.firstOrNull()
             } else {
-                val allMetas = (indianCategories.flatMap { it.second } + topMovies + topSeries + actionMovies + scifiMovies)
+                val allMetas = (hfCatalogItems + indianCategories.flatMap { it.second } + topMovies + topSeries + actionMovies + scifiMovies)
                     .filter { !it.background.isNullOrBlank() || !it.poster.isNullOrBlank() }
                     .distinctBy { it.id }
                     .shuffled()
@@ -351,6 +365,8 @@ fun HomeScreen(
                                         continueWatchingFirstItemFR.requestFocus()
                                     } else if (watchlist.isNotEmpty()) {
                                         watchlistFirstItemFR.requestFocus()
+                                    } else if (hfCatalogItems.isNotEmpty()) {
+                                        rowHfFirstItemFR.requestFocus()
                                     } else if (indianCategories.isNotEmpty()) {
                                         getDynamicRowFirstItemFR(0).requestFocus()
                                     } else {
@@ -682,6 +698,22 @@ fun HomeScreen(
                                 }
                             }
                         }
+                    }
+                }
+
+                // HuggingFace Direct Catalog Row (Instant Streams)
+                if (hfCatalogItems.isNotEmpty()) {
+                    item {
+                        MediaCatalogRow(
+                            title = "⚡ HuggingFace Direct (Instant Streams)",
+                            items = hfCatalogItems,
+                            scrollState = rowScrollStates.getOrPut("cat_hf_direct") { androidx.compose.foundation.lazy.LazyListState() },
+                            firstItemFocusRequester = rowHfFirstItemFR,
+                            onSeeMoreClick = {
+                                onNavigateToCatalog("⚡ HuggingFace Direct", "movie", "hftor", null)
+                            },
+                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
+                        )
                     }
                 }
 

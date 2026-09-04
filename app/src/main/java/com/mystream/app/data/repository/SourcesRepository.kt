@@ -450,6 +450,69 @@ class SourcesRepository(
             .map { it.toStremioMetaPreview() }
     }
 
+    private fun mapHfRecordToPreview(rec: com.mystream.app.data.db.HfTorRecord): StremioMetaPreview {
+        val cleanId = rec.imdbId.substringBefore(":")
+        val isSeries = rec.imdbId.contains(":")
+
+        val pattern = Regex("""^(.*?)(?:\s*[\(\.]?(\d{4})[\)\.]?|\s+[sS]\d+|\s+1080p|\s+720p|\s+2160p|\s+4K|\s+WEB)""", RegexOption.IGNORE_CASE)
+        val match = pattern.find(rec.name)
+        val parsedTitle = match?.groupValues?.getOrNull(1)?.replace('.', ' ')?.trim()?.ifBlank { null }
+            ?: rec.name.substringBefore("(").replace('.', ' ').trim().ifBlank { rec.name }
+        val parsedYear = match?.groupValues?.getOrNull(2)?.ifBlank { null }
+
+        return StremioMetaPreview(
+            id = cleanId,
+            type = if (isSeries) "series" else "movie",
+            name = parsedTitle,
+            poster = "https://images.metahub.space/poster/medium/$cleanId/img",
+            description = rec.name,
+            releaseInfo = parsedYear ?: ""
+        )
+    }
+
+    private fun mapHfRecordToStreamSource(rec: com.mystream.app.data.db.HfTorRecord): StremioStreamSource {
+        val sizeGb = rec.size / (1024.0 * 1024.0 * 1024.0)
+        val sizeFormatted = if (sizeGb >= 1.0) String.format(java.util.Locale.US, "%.2f GB", sizeGb)
+                           else String.format(java.util.Locale.US, "%.0f MB", rec.size / (1024.0 * 1024.0))
+
+        val quality = when {
+            rec.name.contains("2160", ignoreCase = true) || rec.name.contains("4K", ignoreCase = true) -> "4K"
+            rec.name.contains("1080", ignoreCase = true) -> "1080p"
+            rec.name.contains("720", ignoreCase = true) -> "720p"
+            rec.name.contains("480", ignoreCase = true) -> "480p"
+            else -> "HD"
+        }
+
+        val nameTag = "⚡ [HF Direct] $quality"
+        val detailTitle = "${rec.name}\n⚡ Instant Direct • HuggingFace CDN • $sizeFormatted"
+
+        return StremioStreamSource(
+            name = nameTag,
+            title = detailTitle,
+            url = rec.url,
+            providerName = "HF"
+        )
+    }
+
+    suspend fun fetchHfCatalog(skip: Int = 0, limit: Int = 30): StremioCatalogResponse = withContext(Dispatchers.IO) {
+        val config = pikpakResolver.loadConfig()
+        val postgresUrl = config.postgresUrl.orEmpty()
+        if (postgresUrl.isBlank()) return@withContext StremioCatalogResponse(emptyList())
+
+        val records = PostgresAccountFetcher.getHfCatalog(postgresUrl, limit = limit, offset = skip)
+        val previews = records.map { mapHfRecordToPreview(it) }
+        StremioCatalogResponse(metas = previews)
+    }
+
+    suspend fun searchHfCatalog(query: String): List<StremioMetaPreview> = withContext(Dispatchers.IO) {
+        val config = pikpakResolver.loadConfig()
+        val postgresUrl = config.postgresUrl.orEmpty()
+        if (postgresUrl.isBlank()) return@withContext emptyList()
+
+        val records = PostgresAccountFetcher.searchHfTor(postgresUrl, query, limit = 20)
+        records.map { mapHfRecordToPreview(it) }
+    }
+
     private val catalogMemoryCache = object : java.util.LinkedHashMap<String, StremioCatalogResponse>(60, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, StremioCatalogResponse>?): Boolean = size > 60
     }
@@ -466,6 +529,9 @@ class SourcesRepository(
         sourceUrl: String = DEFAULT_CATALOG_SOURCES.first().baseUrl,
         forceRefresh: Boolean = false
     ): StremioCatalogResponse {
+        if (catalogId == "hftor") {
+            return fetchHfCatalog(skip = skip, limit = 30)
+        }
         if (catalogId == "imdb-indian" || type == "indian") {
             val category = genre?.takeIf { it.isNotBlank() } ?: "Top Rated"
             return fetchIndianCatalog(category = category, skip = skip, limit = 20)
@@ -665,10 +731,28 @@ class SourcesRepository(
             }
         }
 
+        val config = pikpakResolver.loadConfig()
+        val postgresUrl = config.postgresUrl.orEmpty()
+
+        // 1. Instantly query HuggingFace direct streams from Postgres
+        val hfStreams = if (postgresUrl.isNotBlank()) {
+            try {
+                val hfRecords = PostgresAccountFetcher.getHfTorRecords(postgresUrl, imdbId)
+                hfRecords.map { mapHfRecordToStreamSource(it) }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        } else emptyList()
+
+        if (hfStreams.isNotEmpty()) {
+            emit(hfStreams)
+        }
+
         pikpakResolver.streamPikPakStreams(type, imdbId, forceRefresh = forceRefresh).collect { list ->
-            if (list.isNotEmpty()) {
-                persistStreams(cacheKey, list, configuredTtl)
-                emit(list)
+            val combined = (hfStreams + list).distinctBy { it.url ?: it.infoHash }
+            if (combined.isNotEmpty()) {
+                persistStreams(cacheKey, combined, configuredTtl)
+                emit(combined)
             }
         }
     }
@@ -695,11 +779,23 @@ class SourcesRepository(
             }
         }
 
+        val config = pikpakResolver.loadConfig()
+        val postgresUrl = config.postgresUrl.orEmpty()
+        val hfStreams = if (postgresUrl.isNotBlank()) {
+            try {
+                val hfRecords = PostgresAccountFetcher.getHfTorRecords(postgresUrl, imdbId)
+                hfRecords.map { mapHfRecordToStreamSource(it) }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        } else emptyList()
+
         val streams = pikpakResolver.resolvePikPakStreams(type, imdbId)
-        if (streams.isNotEmpty()) {
-            persistStreams(cacheKey, streams, configuredTtl)
+        val combined = (hfStreams + streams).distinctBy { it.url ?: it.infoHash }
+        if (combined.isNotEmpty()) {
+            persistStreams(cacheKey, combined, configuredTtl)
         }
-        return streams
+        return combined
     }
 
     suspend fun checkStreamArchiveStatus(url: String): Boolean {
@@ -710,6 +806,9 @@ class SourcesRepository(
         stream: StremioStreamSource,
         imdbId: String
     ): Result<String> {
+        if (!stream.url.isNullOrBlank() && stream.providerName == "HF") {
+            return Result.success(stream.url)
+        }
         return pikpakResolver.resolveDirectStreamUrlOnDemand(stream, imdbId)
     }
 
