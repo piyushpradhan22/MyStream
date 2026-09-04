@@ -194,6 +194,12 @@ class AppUpdateManager(private val context: Context) {
             val latestCode = parseVersionCodeFromTagOrName(cleanVersion)
             val isAvailable = isRemoteVersionNewer(currentName, currentCode, cleanVersion, latestCode)
 
+            val validChangelog = release.body?.takeIf { body ->
+                body.isNotBlank() && !body.trim().startsWith("**Full Changelog**")
+            } ?: tryFetchRawVersionJson(currentCode, currentName)?.changelog
+            ?: release.body?.takeIf { it.isNotBlank() }
+            ?: "Performance improvements & bug fixes."
+
             return AppUpdateCheckResult(
                 isUpdateAvailable = isAvailable,
                 currentVersionName = currentName,
@@ -201,7 +207,7 @@ class AppUpdateManager(private val context: Context) {
                 latestVersionName = cleanVersion.ifBlank { rawTag },
                 latestVersionCode = latestCode,
                 downloadUrl = downloadUrl,
-                changelog = release.body?.takeIf { it.isNotBlank() } ?: release.name ?: "Performance improvements & bug fixes."
+                changelog = validChangelog
             )
         } catch (e: Exception) {
             android.util.Log.e("AppUpdateManager", "GitHub release fetch error", e)
