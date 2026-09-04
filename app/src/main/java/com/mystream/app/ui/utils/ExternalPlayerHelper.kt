@@ -39,17 +39,25 @@ object ExternalPlayerHelper {
                     putExtra("return_result", true)
                 }
 
-                // Headers (PikPak User-Agent, Accept-Encoding)
-                val headers = mutableListOf("User-Agent", "ANDROID-com.pikcloud.pikpak/1.47.1")
+                // Headers (User-Agent, Accept-Encoding)
+                val isHf = streamUrl.contains("huggingface.co", ignoreCase = true) || streamUrl.contains("hf.co", ignoreCase = true) || streamUrl.contains("aws.cdn.hf.co", ignoreCase = true)
+                val defaultUa = if (isHf) "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" else "ANDROID-com.pikcloud.pikpak/1.47.1"
+                val headers = mutableListOf("User-Agent", defaultUa)
                 item.headers?.forEach { (k, v) ->
-                    headers.add(k)
-                    headers.add(v)
+                    if (!k.equals("User-Agent", ignoreCase = true)) {
+                        headers.add(k)
+                        headers.add(v)
+                    }
                 }
                 putExtra("headers", headers.toTypedArray())
 
                 val bundle = Bundle().apply {
-                    putString("User-Agent", "ANDROID-com.pikcloud.pikpak/1.47.1")
-                    item.headers?.forEach { (k, v) -> putString(k, v) }
+                    putString("User-Agent", defaultUa)
+                    item.headers?.forEach { (k, v) -> 
+                        if (!k.equals("User-Agent", ignoreCase = true)) {
+                            putString(k, v)
+                        }
+                    }
                 }
                 putExtra("android.media.intent.extra.HTTP_HEADERS", bundle)
             }

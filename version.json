@@ -1,6 +1,6 @@
 {
-  "versionCode": 16,
-  "versionName": "1.0.15",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.15/app-universal-release.apk",
-  "changelog": "• ⚡ HuggingFace Direct Streaming: Added instant, unthrottled streaming directly from HuggingFace dataset AWS CloudFront CDN with 0 waiting time\n• ⚡ HuggingFace Direct Home Catalog: Dedicated home catalog row showcasing the latest high-speed movies & series with full poster art and 'See All' grid browsing\n• ⚡ Instant HF Stream Badges: Distinctive amber/gold [⚡ HF DIRECT] badges on stream cards in 4K UHD and 1080p FHD\n• 🔍 Integrated Dataset Search: HuggingFace catalog items are seamlessly included in global search results\n• 📱 UI & Orientation Stability: Maintained rock-solid portrait lock during app browsing, smooth landscape playback, and intact system auto-rotate settings"
+  "versionCode": 17,
+  "versionName": "1.0.16",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.16/app-universal-release.apk",
+  "changelog": "• 🚀 Local Streaming Proxy: Embedded high-throughput StreamProxyServer on 127.0.0.1 to eliminate buffering stalls on 4K streams\n• ⚡ 4MB High-Throughput Socket Engine: Configured RFC 1323 TCP window scaling (4MB SO_RCVBUF) to unlock 10-20 MB/s over transatlantic CDNs\n• 🎬 Asynchronous MediaCodec: Enabled asynchronous MediaCodec queueing on Android TV hardware decoders for rock-solid 4K HEVC rendering\n• ⚡ Clean 'HF Direct' Row: Clean home screen layout with dedicated HF Direct catalog and instant stream badges\n• 📱 Direct External Player Launch: Passed resolved CDN endpoints to external players (Just Player / VLC) with zero redirect latency"
 }

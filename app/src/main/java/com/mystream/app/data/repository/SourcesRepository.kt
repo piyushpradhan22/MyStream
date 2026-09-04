@@ -484,7 +484,7 @@ class SourcesRepository(
         }
 
         val nameTag = "⚡ [HF Direct] $quality"
-        val detailTitle = "${rec.name}\n⚡ Instant Direct • HuggingFace CDN • $sizeFormatted"
+        val detailTitle = "${rec.name}\n⚡ HF Direct • $sizeFormatted"
 
         return StremioStreamSource(
             name = nameTag,

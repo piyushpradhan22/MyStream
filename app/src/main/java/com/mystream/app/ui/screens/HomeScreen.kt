@@ -75,7 +75,6 @@ import com.mystream.app.data.model.MediaPlaybackItem
 import com.mystream.app.data.model.StremioMetaPreview
 import com.mystream.app.data.repository.SourcesRepository
 import com.mystream.app.ui.components.CustomUrlDialog
-import com.mystream.app.ui.components.HeroBanner
 import com.mystream.app.ui.components.PosterCard
 import com.mystream.app.ui.theme.BgDark
 import com.mystream.app.ui.theme.PrimaryNeon
@@ -121,7 +120,6 @@ fun HomeScreen(
     val continueWatchingList by repository.continueWatchingFlow.collectAsState(initial = emptyList())
     val watchlist by repository.watchlistFlow.collectAsState(initial = emptyList())
 
-    val heroPlayFocusRequester = remember { FocusRequester() }
     val searchFocusRequester = remember { FocusRequester() }
     val continueWatchingFirstItemFR = remember { FocusRequester() }
     val watchlistFirstItemFR = remember { FocusRequester() }
@@ -149,21 +147,6 @@ fun HomeScreen(
     var scifiMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
     var comedySeries by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
 
-    var featuredItem by remember { mutableStateOf<StremioMetaPreview?>(null) }
-    var featuredPool by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var featuredIndex by remember { mutableIntStateOf(0) }
-    var heroAutoAdvanceTrigger by remember { mutableLongStateOf(0L) }
-
-    // Automatic smooth rotation of suggestion cards every 6.5s
-    LaunchedEffect(featuredPool, heroAutoAdvanceTrigger) {
-        if (featuredPool.size > 1) {
-            while (true) {
-                delay(6500)
-                featuredIndex = (featuredIndex + 1) % featuredPool.size
-                featuredItem = featuredPool[featuredIndex]
-            }
-        }
-    }
     var isLoading by remember { mutableStateOf(true) }
     var reloadTrigger by remember { mutableIntStateOf(0) }
     var loadError by remember { mutableStateOf<String?>(null) }
@@ -207,12 +190,17 @@ fun HomeScreen(
 
     val listState = rememberLazyListState()
 
-    LaunchedEffect(isLoading, featuredItem) {
-        if (!isLoading && featuredItem != null) {
-            kotlinx.coroutines.delay(100)
+    LaunchedEffect(isLoading, continueWatchingList.size, hfCatalogItems.size) {
+        if (!isLoading) {
+            kotlinx.coroutines.delay(120)
             try {
-                heroPlayFocusRequester.requestFocus()
-                kotlinx.coroutines.delay(50)
+                if (continueWatchingList.isNotEmpty()) {
+                    continueWatchingFirstItemFR.requestFocus()
+                } else if (hfCatalogItems.isNotEmpty()) {
+                    rowHfFirstItemFR.requestFocus()
+                } else {
+                    searchFocusRequester.requestFocus()
+                }
                 listState.scrollToItem(0, 0)
             } catch (_: Exception) {
                 // ignore
@@ -231,10 +219,6 @@ fun HomeScreen(
                     try {
                         val allIndian = repository.getAllIndianCategories()
                         indianCategories = allIndian
-                        val firstCatItems = allIndian.firstOrNull()?.second
-                        if (featuredItem == null && !firstCatItems.isNullOrEmpty()) {
-                            featuredItem = firstCatItems.first()
-                        }
                     } catch (e: Exception) {
                         android.util.Log.e("HomeScreen", "Error loading all Indian categories", e)
                     }
@@ -244,9 +228,6 @@ fun HomeScreen(
                     try {
                         val moviesRes = repository.fetchCatalog("movie", "top", skip = 0)
                         topMovies = moviesRes.metas
-                        if (featuredItem == null && moviesRes.metas.isNotEmpty()) {
-                            featuredItem = moviesRes.metas.firstOrNull()
-                        }
                     } catch (e: Exception) {
                         android.util.Log.e("HomeScreen", "Error loading top movies", e)
                     }
@@ -292,30 +273,9 @@ fun HomeScreen(
                     try {
                         val hfRes = repository.fetchHfCatalog(skip = 0, limit = 30)
                         hfCatalogItems = hfRes.metas
-                        if (featuredItem == null && hfRes.metas.isNotEmpty()) {
-                            featuredItem = hfRes.metas.firstOrNull()
-                        }
                     } catch (e: Exception) {
                         android.util.Log.e("HomeScreen", "Error loading HuggingFace catalog", e)
                     }
-                }
-            }
-
-            // Build randomized pool of featured cards once at boot and keep fixed throughout the session
-            val existingBootPool = repository.bootFeaturedPool
-            if (!existingBootPool.isNullOrEmpty()) {
-                featuredPool = existingBootPool
-                featuredItem = existingBootPool.firstOrNull()
-            } else {
-                val allMetas = (hfCatalogItems + indianCategories.flatMap { it.second } + topMovies + topSeries + actionMovies + scifiMovies)
-                    .filter { !it.background.isNullOrBlank() || !it.poster.isNullOrBlank() }
-                    .distinctBy { it.id }
-                    .shuffled()
-
-                if (allMetas.isNotEmpty()) {
-                    repository.bootFeaturedPool = allMetas
-                    featuredPool = allMetas
-                    featuredItem = allMetas.first()
                 }
             }
         } finally {
@@ -342,175 +302,131 @@ fun HomeScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 40.dp)
         ) {
-            // Combined Cinematic Top Section (Header + Hero Banner in item 0)
+            // Lightweight Top Search & Navigation Bar in item 0
             item {
-                Box(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(340.dp)
+                        .appTopBarPadding(additionalTop = 12.dp)
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Hero Banner content
-                    featuredItem?.let { hero ->
-                        HeroBanner(
-                            item = hero,
-                            playFocusRequester = heroPlayFocusRequester,
-                            onNavigateUp = {
-                                try {
-                                    searchFocusRequester.requestFocus()
-                                } catch (_: Exception) {}
-                            },
-                            onNavigateDown = {
-                                try {
-                                    if (continueWatchingList.isNotEmpty()) {
-                                        continueWatchingFirstItemFR.requestFocus()
-                                    } else if (watchlist.isNotEmpty()) {
-                                        watchlistFirstItemFR.requestFocus()
-                                    } else if (hfCatalogItems.isNotEmpty()) {
-                                        rowHfFirstItemFR.requestFocus()
-                                    } else if (indianCategories.isNotEmpty()) {
-                                        getDynamicRowFirstItemFR(0).requestFocus()
-                                    } else {
-                                        row1FirstItemFR.requestFocus()
-                                    }
-                                } catch (_: Exception) {}
-                            },
-                            onNavigateLeft = {
-                                if (featuredPool.size > 1) {
-                                    featuredIndex = (featuredIndex - 1 + featuredPool.size) % featuredPool.size
-                                    featuredItem = featuredPool[featuredIndex]
-                                    heroAutoAdvanceTrigger++
-                                }
-                            },
-                            onNavigateRight = {
-                                if (featuredPool.size > 1) {
-                                    featuredIndex = (featuredIndex + 1) % featuredPool.size
-                                    featuredItem = featuredPool[featuredIndex]
-                                    heroAutoAdvanceTrigger++
-                                }
-                            },
-                            onSelectIndex = { targetIdx ->
-                                if (targetIdx in featuredPool.indices) {
-                                    featuredIndex = targetIdx
-                                    featuredItem = featuredPool[targetIdx]
-                                    heroAutoAdvanceTrigger++
-                                }
-                            },
-                            itemCount = featuredPool.size,
-                            currentIndex = featuredIndex,
-                            onPlayClick = {
-                                onNavigateToDetail(hero.type, hero.id)
-                            },
-                            height = 340
+                    // Brand Logo Icon Only (Text label removed)
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(PrimaryNeon),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayCircle,
+                            contentDescription = "MyStream",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
 
-                    // Top App Bar: Responsive dynamic layout
+                    // Dynamically resizing Search Bar (fits portrait mobile and landscape TV)
+                    val searchInteraction = remember { MutableInteractionSource() }
+                    val isSearchFocused by searchInteraction.collectIsFocusedAsState()
+
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .appTopBarPadding(additionalTop = 10.dp)
-                            .padding(horizontal = 16.dp)
-                            .padding(bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(21.dp))
+                            .background(if (isSearchFocused) FocusRingOrange.copy(alpha = 0.22f) else Color(0x6607090E))
+                            .border(
+                                width = if (isSearchFocused) 2.dp else 1.dp,
+                                color = if (isSearchFocused) FocusRingOrange else Color(0x33FFFFFF),
+                                shape = RoundedCornerShape(21.dp)
+                            )
+                            .focusRequester(searchFocusRequester)
+                            .focusable(interactionSource = searchInteraction)
+                            .onPreviewKeyEvent { keyEvent ->
+                                if (keyEvent.type == KeyEventType.KeyDown) {
+                                    when (keyEvent.key) {
+                                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                            onNavigateToSearch()
+                                            true
+                                        }
+                                        Key.DirectionDown -> {
+                                            try {
+                                                if (continueWatchingList.isNotEmpty()) {
+                                                    continueWatchingFirstItemFR.requestFocus()
+                                                } else if (hfCatalogItems.isNotEmpty()) {
+                                                    rowHfFirstItemFR.requestFocus()
+                                                } else if (watchlist.isNotEmpty()) {
+                                                    watchlistFirstItemFR.requestFocus()
+                                                } else if (indianCategories.isNotEmpty()) {
+                                                    getDynamicRowFirstItemFR(0).requestFocus()
+                                                } else {
+                                                    row1FirstItemFR.requestFocus()
+                                                }
+                                                true
+                                            } catch (_: Exception) {
+                                                false
+                                            }
+                                        }
+                                        else -> false
+                                    }
+                                } else false
+                            }
+                            .clickable(interactionSource = searchInteraction, indication = null, onClick = onNavigateToSearch)
+                            .padding(horizontal = 14.dp)
                     ) {
-                        // Brand Logo Icon Only (Text label removed)
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(PrimaryNeon),
-                            contentAlignment = Alignment.Center
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = if (isSearchFocused) FocusRingOrange else SecondaryCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Search movies, series, cast...",
+                            color = if (isSearchFocused) TextPrimary else TextMuted,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // Right Action Buttons (Custom URL & Settings)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        IconButton(
+                            onClick = { showCustomUrlDialog = true },
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.PlayCircle,
-                                contentDescription = "MyStream",
-                                tint = Color.White,
+                                imageVector = Icons.Default.AddLink,
+                                contentDescription = "Play Custom URL / Magnet",
+                                tint = PrimaryNeon,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
 
-                        // Dynamically resizing Search Bar (fits portrait mobile and landscape TV)
-                        val searchInteraction = remember { MutableInteractionSource() }
-                        val isSearchFocused by searchInteraction.collectIsFocusedAsState()
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(if (isSearchFocused) FocusRingOrange.copy(alpha = 0.22f) else Color(0x6607090E))
-                                .border(
-                                    width = if (isSearchFocused) 2.dp else 1.dp,
-                                    color = if (isSearchFocused) FocusRingOrange else Color(0x33FFFFFF),
-                                    shape = RoundedCornerShape(20.dp)
-                                )
-                                .focusRequester(searchFocusRequester)
-                                .focusable(interactionSource = searchInteraction)
-                                .onPreviewKeyEvent { keyEvent ->
-                                    if (keyEvent.type == KeyEventType.KeyDown) {
-                                        when (keyEvent.key) {
-                                            Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                                                onNavigateToSearch()
-                                                true
-                                            }
-                                            else -> false
-                                        }
-                                    } else false
-                                }
-                                .clickable(interactionSource = searchInteraction, indication = null, onClick = onNavigateToSearch)
-                                .padding(horizontal = 12.dp)
+                        IconButton(
+                            onClick = onNavigateToSources,
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Search",
-                                tint = if (isSearchFocused) FocusRingOrange else SecondaryCyan,
-                                modifier = Modifier.size(18.dp)
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings & Providers",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(22.dp)
                             )
-                            Text(
-                                text = "Search movies, series, cast...",
-                                color = if (isSearchFocused) TextPrimary else TextMuted,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        // Right Action Buttons (Custom URL & Settings)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            IconButton(
-                                onClick = { showCustomUrlDialog = true },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AddLink,
-                                    contentDescription = "Play Custom URL / Magnet",
-                                    tint = PrimaryNeon,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = onNavigateToSources,
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Settings,
-                                    contentDescription = "Settings & Providers",
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
             }
 
                 // Continue Watching Section
@@ -604,6 +520,22 @@ fun HomeScreen(
                                 }
                             }
                         }
+                    }
+                }
+
+                // HF Direct Catalog Row (HuggingFace)
+                if (hfCatalogItems.isNotEmpty()) {
+                    item {
+                        MediaCatalogRow(
+                            title = "⚡ HF Direct",
+                            items = hfCatalogItems,
+                            scrollState = rowScrollStates.getOrPut("cat_hf_direct") { androidx.compose.foundation.lazy.LazyListState() },
+                            firstItemFocusRequester = rowHfFirstItemFR,
+                            onSeeMoreClick = {
+                                onNavigateToCatalog("⚡ HF Direct", "movie", "hftor", null)
+                            },
+                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
+                        )
                     }
                 }
 
@@ -701,21 +633,7 @@ fun HomeScreen(
                     }
                 }
 
-                // HuggingFace Direct Catalog Row (Instant Streams)
-                if (hfCatalogItems.isNotEmpty()) {
-                    item {
-                        MediaCatalogRow(
-                            title = "⚡ HuggingFace Direct (Instant Streams)",
-                            items = hfCatalogItems,
-                            scrollState = rowScrollStates.getOrPut("cat_hf_direct") { androidx.compose.foundation.lazy.LazyListState() },
-                            firstItemFocusRequester = rowHfFirstItemFR,
-                            onSeeMoreClick = {
-                                onNavigateToCatalog("⚡ HuggingFace Direct", "movie", "hftor", null)
-                            },
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
-                        )
-                    }
-                }
+
 
                 // All Indian Categories from data.json (preserving exact original names)
                 itemsIndexed(indianCategories, key = { _, pair -> "indian_${pair.first}" }) { idx, pair ->
@@ -1229,6 +1147,23 @@ private fun CategoryBadgeIcon(categoryName: String) {
                     color = Color.White,
                     fontWeight = FontWeight.Black,
                     fontSize = 11.sp
+                )
+            }
+        }
+        clean.contains("HF", ignoreCase = true) || clean.contains("HuggingFace", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFFFFB300).copy(alpha = 0.2f))
+                    .border(1.dp, Color(0xFFFFB300), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "⚡ HF DIRECT",
+                    color = Color(0xFFFFD54F),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp
                 )
             }
         }

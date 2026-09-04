@@ -307,6 +307,7 @@ class MainActivity : ComponentActivity() {
             app.playerManager.pause()
             Log.d(TAG, "Activity onStop: paused player")
         }
+        com.mystream.app.player.MediaCacheManager.clearCacheAsync()
     }
 
     // Android TV D-Pad & Remote Control Key Handlers
@@ -366,5 +367,11 @@ class MainActivity : ComponentActivity() {
         }
 
         return false
+    }
+
+
+    override fun onDestroy() {
+        super.onDestroy()
+        com.mystream.app.player.MediaCacheManager.clearCacheAsync()
     }
 }

@@ -44,7 +44,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -71,7 +74,7 @@ class MyStreamPlayerManager(
                 .setSelectUndeterminedTextLanguage(false)
                 .setExceedVideoConstraintsIfNecessary(true)
                 .setExceedRendererCapabilitiesIfNecessary(false) // Never force-pick unsupported audio tracks (e.g. TrueHD 7.1)
-                .setExceedAudioConstraintsIfNecessary(true)
+                .setExceedAudioConstraintsIfNecessary(false)
                 .setAllowVideoMixedMimeTypeAdaptiveness(true)
                 .setAllowVideoNonSeamlessAdaptiveness(true)
                 .setMaxVideoBitrate(Int.MAX_VALUE)
@@ -84,6 +87,7 @@ class MyStreamPlayerManager(
         setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         setEnableDecoderFallback(true)
         setMediaCodecSelector(MediaCodecSelector.DEFAULT)
+        forceEnableMediaCodecAsynchronousQueueing()
     }
 
     private var isCurrentStreamArchive = false
@@ -93,79 +97,68 @@ class MyStreamPlayerManager(
     private val _archiveRetryCount = MutableStateFlow(0)
     val archiveRetryCount: StateFlow<Int> = _archiveRetryCount.asStateFlow()
 
-    private val playerOkHttpClient = OkHttpClient.Builder()
-        .dns(com.mystream.app.data.api.SystemFallbackDns)
-        .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
-        .connectTimeout(25, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)
-        .writeTimeout(25, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .followRedirects(true)
-        .followSslRedirects(true)
-        .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
-        .addNetworkInterceptor { chain ->
-            val req = chain.request()
-            Log.d(TAG, "Stream HTTP -> ${req.method} ${req.url} (range=${req.header("Range")})")
-            try {
-                val res = chain.proceed(req)
-                val xosErr = res.header("x-xos-err-desc") ?: res.header("X-Xos-Err-Desc")
-                val ossStorage = res.header("x-oss-storage-class") ?: res.header("X-Oss-Storage-Class")
-                val cosStorage = res.header("x-cos-storage-class") ?: res.header("X-Cos-Storage-Class")
-                val isStorageArchive = (ossStorage?.contains("Archive", ignoreCase = true) == true) ||
-                        (cosStorage?.contains("ARCHIVE", ignoreCase = true) == true)
-                if (isStorageArchive) {
-                    isCurrentStreamArchive = true
-                    if (!hasTriggeredThaw) {
-                        hasTriggeredThaw = true
-                        sourcesRepository?.let { repo ->
-                            CoroutineScope(Dispatchers.IO).launch {
-                                try {
-                                    Log.i(TAG, "Triggering PikPak control plane thaw for archive stream: ${req.url}")
-                                    repo.pikpakResolver.triggerArchiveThawForUrl(req.url.toString())
-                                } catch (e: Exception) {
-                                    Log.w(TAG, "Failed to trigger control plane thaw: ${e.message}")
-                                }
-                            }
-                        }
-                    }
-                }
-                val isFrozen = (xosErr == "5") || (isStorageArchive && xosErr != "0")
-
-                Log.i(TAG, "Stream HTTP <- ${res.code} (len=${res.header("Content-Length")}, range=${res.header("Content-Range")}, xosErr=${xosErr}, storage=${ossStorage ?: cosStorage}, type=${res.header("Content-Type")})")
-                if (isFrozen) {
-                    _isArchiveActivating.value = true
-                    _isBuffering.value = true
-                } else if (res.isSuccessful && !isCurrentStreamArchive && (xosErr == "0" || (!isStorageArchive && xosErr == null))) {
-                    _isArchiveActivating.value = false
-                }
-                res
-            } catch (e: Exception) {
-                val msg = e.message.orEmpty().lowercase()
-                if (msg.contains("unexpected end of stream") || msg.contains("protocol") || msg.contains("broken pipe")) {
-                    _isArchiveActivating.value = true
-                    _isBuffering.value = true
-                }
-                Log.e(TAG, "Stream HTTP FAIL -> ${e.message} for ${req.url}", e)
-                throw e
-            }
-        }
-        .build()
-
     private val liveBytesCounter = java.util.concurrent.atomic.AtomicLong(0L)
 
     private val speedTransferListener = object : androidx.media3.datasource.TransferListener {
-        override fun onTransferInitializing(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
-        override fun onTransferStart(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+        override fun onTransferInitializing(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {
+            bandwidthMeter.onTransferInitializing(source, dataSpec, isNetwork)
+        }
+        override fun onTransferStart(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {
+            bandwidthMeter.onTransferStart(source, dataSpec, isNetwork)
+        }
         override fun onBytesTransferred(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
             if (isNetwork) {
                 liveBytesCounter.addAndGet(bytesTransferred.toLong())
             }
+            bandwidthMeter.onBytesTransferred(source, dataSpec, isNetwork, bytesTransferred)
         }
-        override fun onTransferEnd(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+        override fun onTransferEnd(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {
+            bandwidthMeter.onTransferEnd(source, dataSpec, isNetwork)
+        }
     }
 
-    private val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(playerOkHttpClient)
-        .setUserAgent("ANDROID-com.pikcloud.pikpak/1.47.1")
+    class HighThroughputSocketFactory(private val delegate: javax.net.SocketFactory = javax.net.SocketFactory.getDefault()) : javax.net.SocketFactory() {
+        private fun tune(s: java.net.Socket): java.net.Socket {
+            try {
+                s.receiveBufferSize = 4 * 1024 * 1024 // 4 MB TCP receive buffer for high-BDP transatlantic links
+                s.sendBufferSize = 512 * 1024
+                s.tcpNoDelay = true
+                s.trafficClass = 0x10 // IPTOS_LOWDELAY
+            } catch (_: Exception) {}
+            return s
+        }
+        override fun createSocket(): java.net.Socket = tune(delegate.createSocket())
+        override fun createSocket(host: String, port: Int): java.net.Socket = tune(delegate.createSocket(host, port))
+        override fun createSocket(host: String, port: Int, localHost: java.net.InetAddress, localPort: Int): java.net.Socket = tune(delegate.createSocket(host, port, localHost, localPort))
+        override fun createSocket(host: java.net.InetAddress, port: Int): java.net.Socket = tune(delegate.createSocket(host, port))
+        override fun createSocket(address: java.net.InetAddress, port: Int, localAddress: java.net.InetAddress, localPort: Int): java.net.Socket = tune(delegate.createSocket(address, port, localAddress, localPort))
+    }
+
+    // --- OkHttpClient for player with aggressive connection pooling + keep-alive ---
+    private val playerOkHttpClient = OkHttpClient.Builder()
+        .socketFactory(HighThroughputSocketFactory())
+        .eventListener(object : okhttp3.EventListener() {
+            override fun connectionAcquired(call: okhttp3.Call, connection: okhttp3.Connection) {
+                try {
+                    val s = connection.socket()
+                    s.receiveBufferSize = 4 * 1024 * 1024
+                    s.tcpNoDelay = true
+                } catch (_: Exception) {}
+            }
+        })
+        .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .retryOnConnectionFailure(true)
+        .build()
+
+    private val streamProxyServer = StreamProxyServer(playerOkHttpClient)
+
+    private val httpDataSourceFactory = OkHttpDataSource.Factory(playerOkHttpClient)
+        .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
         .setTransferListener(speedTransferListener)
 
     private val extractorsFactory = androidx.media3.extractor.DefaultExtractorsFactory().apply {
@@ -184,15 +177,12 @@ class MyStreamPlayerManager(
         .setLoadErrorHandlingPolicy(object : DefaultLoadErrorHandlingPolicy() {
             override fun getMinimumLoadableRetryCount(dataType: Int): Int {
                 if (isCurrentStreamArchive || _isArchiveActivating.value) return 180
-                return 8
+                return 12
             }
 
             override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
                 val ex = loadErrorInfo.exception
-                val isNetworkDrop = ex is java.net.ProtocolException || 
-                                    ex is java.net.SocketException ||
-                                    ex is java.net.SocketTimeoutException ||
-                                    ex is androidx.media3.datasource.HttpDataSource.HttpDataSourceException
+                val isNetworkDrop = ex !is androidx.media3.common.ParserException
                 
                 if (isCurrentStreamArchive || _isArchiveActivating.value) {
                     _isArchiveActivating.value = true
@@ -202,38 +192,50 @@ class MyStreamPlayerManager(
                     if (count <= 180) {
                         val delayMs = when {
                             count <= 20 -> 2500L
-                            count <= 60 -> 3000L
-                            else -> 4000L
+                            count <= 60 -> 4000L
+                            else -> 5000L
                         }
-                        Log.w(TAG, "Archive stream thawing retry #$count/180 (delay=${delayMs}ms): ${ex.message}")
+                        Log.i(TAG, "Archive cold-storage thaw in progress (#$count/180), retrying in ${delayMs}ms...")
                         return delayMs
                     }
                     return C.TIME_UNSET
                 }
                 
-                if (isNetworkDrop && loadErrorInfo.errorCount <= 8) {
-                    Log.w(TAG, "Network stream retry #${loadErrorInfo.errorCount}/8 (delay=1500ms): ${ex.message}")
-                    return 1500L
+                if (isNetworkDrop && loadErrorInfo.errorCount <= 12) {
+                    Log.w(TAG, "Network stream retry #${loadErrorInfo.errorCount}/12 (delay=1000ms): ${ex.message}")
+                    return 1000L
                 }
                 
                 val base = super.getRetryDelayMsFor(loadErrorInfo)
                 return when {
                     base == C.TIME_UNSET -> 1000L
-                    else -> base.coerceIn(500L, 3000L)
+                    else -> base.coerceIn(500L, 2500L)
                 }
             }
         })
 
-    private val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
-        .setBufferDurationsMs(
-            /* minBufferMs = */ 15_000,
-            /* maxBufferMs = */ 30_000,
-            /* bufferForPlaybackMs = */ 2_000,
-            /* bufferForPlaybackAfterRebufferMs = */ 3_000
-        )
-        .setTargetBufferBytes(25 * 1024 * 1024) // 25MB max buffer memory footprint
-        .setPrioritizeTimeOverSizeThresholds(true)
-        .build()
+    // Continuous streaming LoadControl: overrides shouldContinueLoading to prevent stop-and-go TCP window collapse
+    private val loadControl: androidx.media3.exoplayer.LoadControl by lazy {
+        object : androidx.media3.exoplayer.DefaultLoadControl(
+            androidx.media3.exoplayer.upstream.DefaultAllocator(true, 64 * 1024),
+            /* minBufferMs = */ 120_000,
+            /* maxBufferMs = */ 240_000,
+            /* bufferForPlaybackMs = */ 5_000, // 5s solid startup cushion
+            /* bufferForPlaybackAfterRebufferMs = */ 10_000, // 10s cushion on seek/rebuffer to let TCP window ramp up
+            /* targetBufferBytes = */ 180 * 1024 * 1024,
+            /* prioritizeTimeOverSizeThresholds = */ true,
+            /* backBufferDurationMs = */ 0,
+            /* retainBackBufferFromKeyframe = */ false
+        ) {
+            override fun shouldContinueLoading(parameters: androidx.media3.exoplayer.LoadControl.Parameters): Boolean {
+                // Prevent micro-burst choking: always download continuously until at least 90s of video is buffered in RAM
+                if (parameters.bufferedDurationUs < 90_000_000L) {
+                    return true
+                }
+                return super.shouldContinueLoading(parameters)
+            }
+        }
+    }
 
     val player: ExoPlayer = ExoPlayer.Builder(context, renderersFactory)
         .setTrackSelector(trackSelector)
@@ -309,6 +311,7 @@ class MyStreamPlayerManager(
     }
 
     init {
+        streamProxyServer.start()
         setupPlayerListeners()
         try {
             val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
@@ -405,6 +408,7 @@ class MyStreamPlayerManager(
         tickerJob?.cancel()
         tickerJob = scope.launch {
             var lastSaveTick = 0L
+            var lastLogTick = 0L
             var lastSpeedCalcTime = System.currentTimeMillis()
             while (isActive) {
                 if (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING) {
@@ -442,9 +446,87 @@ class MyStreamPlayerManager(
                         lastSaveTick = now
                         saveCurrentProgress()
                     }
+
+                    if (now - lastLogTick > 4000L) {
+                        lastLogTick = now
+                        Log.d(TAG, "Player Status: pos=${_currentPosition.value / 1000}s/${_duration.value / 1000}s, buf=${_bufferedPosition.value / 1000}s (${_bufferPercentage.value}%), speed=$speedStr, state=${player.playbackState}, isBuffering=${_isBuffering.value}")
+                    }
                 }
                 delay(350)
             }
+        }
+    }
+
+    private suspend fun resolveFinalStreamUrl(url: String): String = withContext(Dispatchers.IO) {
+        val urlLower = url.lowercase()
+        if (!urlLower.contains("huggingface.co/datasets/") && !urlLower.contains("hf.co/datasets/")) {
+            return@withContext url
+        }
+        try {
+            Log.i(TAG, "Resolving direct CDN location for HuggingFace stream: $url")
+            val client = OkHttpClient.Builder()
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
+                .build()
+
+            var current = url
+            var hops = 0
+            while (hops < 5) {
+                val req = Request.Builder()
+                    .url(current)
+                    .head()
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+                    .build()
+                val resp = client.newCall(req).execute()
+                val loc = resp.header("Location")
+                val code = resp.code
+                resp.close()
+                if ((code in 301..308) && !loc.isNullOrBlank()) {
+                    current = if (loc.startsWith("http", ignoreCase = true)) loc else java.net.URI(current).resolve(loc).toString()
+                    hops++
+                    Log.i(TAG, "Resolved direct CDN URL #$hops -> $current")
+                } else {
+                    break
+                }
+            }
+            val finalUrl = current
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val benchClient = OkHttpClient.Builder()
+                        .socketFactory(HighThroughputSocketFactory())
+                        .connectTimeout(10, TimeUnit.SECONDS)
+                        .readTimeout(15, TimeUnit.SECONDS)
+                        .build()
+                    val benchReq = Request.Builder()
+                        .url(finalUrl)
+                        .header("Range", "bytes=100000000-110485760")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                        .build()
+                    val t0 = System.currentTimeMillis()
+                    val benchResp = benchClient.newCall(benchReq).execute()
+                    val inStream = benchResp.body?.byteStream()
+                    val b = ByteArray(64 * 1024)
+                    var readTotal = 0L
+                    var len = 0
+                    while (inStream?.read(b)?.also { len = it } != null && len != -1) {
+                        readTotal += len
+                    }
+                    inStream?.close()
+                    benchResp.close()
+                    val dt = (System.currentTimeMillis() - t0).coerceAtLeast(1L)
+                    val mbs = (readTotal / 1024.0 / 1024.0) / (dt / 1000.0)
+                    val mbps = (readTotal * 8.0 / (dt / 1000.0)) / 1_000_000.0
+                    Log.i(TAG, "RAW TV NETWORK BENCHMARK: Downloaded ${readTotal / (1024 * 1024)}MB in ${dt}ms -> %.2f MB/s (%.2f Mbps)".format(mbs, mbps))
+                } catch (e: Exception) {
+                    Log.w(TAG, "RAW TV NETWORK BENCHMARK FAILED: ${e.message}")
+                }
+            }
+            finalUrl
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to resolve CDN redirect: ${e.message}, using original URL")
+            url
         }
     }
 
@@ -480,22 +562,46 @@ class MyStreamPlayerManager(
         if (streamDurationFallbackMs > 0L) {
             _duration.value = streamDurationFallbackMs
         }
-        Log.i(TAG, "Playing media (start at ${actualStartPos}ms, urlDuration=${streamDurationFallbackMs}ms): ${item.title} -> ${item.mediaUrl}")
+
+        scope.launch {
+            val directUrl = resolveFinalStreamUrl(item.mediaUrl)
+            _currentItem.value = item.copy(mediaUrl = directUrl)
+            val streamUrl = if (directUrl.startsWith("http", ignoreCase = true)) {
+                streamProxyServer.getProxyUrl(directUrl)
+            } else {
+                directUrl
+            }
+            startPlaybackInternal(item, streamUrl, actualStartPos)
+        }
+    }
+
+    private fun startPlaybackInternal(item: MediaPlaybackItem, playUrl: String, actualStartPos: Long) {
+        Log.i(TAG, "Starting playback (start at ${actualStartPos}ms, urlDuration=${streamDurationFallbackMs}ms): ${item.title} -> $playUrl")
 
         val reqProps = mutableMapOf<String, String>()
-        reqProps["User-Agent"] = "ANDROID-com.pikcloud.pikpak/1.47.1"
-        if (item.mediaUrl.contains("mypikpak.com/download/", ignoreCase = true)) {
+        val urlLower = playUrl.lowercase()
+        val isHfStream = urlLower.contains("huggingface.co") || urlLower.contains("hf.co") || urlLower.contains("cloudfront.net") || urlLower.contains("aws.cdn.hf.co")
+        if (isHfStream) {
+            // HuggingFace / AWS CDN: use browser User-Agent for full-speed downloads
+            httpDataSourceFactory.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+        } else {
+            httpDataSourceFactory.setUserAgent("ANDROID-com.pikcloud.pikpak/1.47.1")
+        }
+        if (urlLower.contains("mypikpak.com/download/")) {
             reqProps["Accept-Encoding"] = "identity"
         }
         item.headers?.forEach { (k, v) -> 
-            if (!k.equals("Range", ignoreCase = true)) {
+            if (!k.equals("Range", ignoreCase = true) && !k.equals("User-Agent", ignoreCase = true)) {
                 reqProps[k] = v
             }
         }
         httpDataSourceFactory.setDefaultRequestProperties(reqProps)
-        Log.d(TAG, "Stream request props: acceptEncoding=${reqProps["Accept-Encoding"] ?: "default"}")
+        Log.d(TAG, "Stream request props: isHF=$isHfStream, acceptEncoding=${reqProps["Accept-Encoding"] ?: "default"}")
 
-        val uri = Uri.parse(item.mediaUrl)
+        val uri = Uri.parse(playUrl)
+
+        // Stable cache key: strip query params so tokens don't invalidate cache
+        val stableCacheKey = uri.buildUpon().clearQuery().build().toString()
 
         val metadata = MediaMetadata.Builder()
             .setTitle(item.title)
@@ -507,10 +613,10 @@ class MyStreamPlayerManager(
         val mediaItemBuilder = MediaItem.Builder()
             .setUri(uri)
             .setMediaId(item.id)
+            .setCustomCacheKey(stableCacheKey)
             .setMediaMetadata(metadata)
 
         val titleLower = item.title.lowercase()
-        val urlLower = item.mediaUrl.lowercase()
         if (titleLower.contains(".mp4") || urlLower.contains(".mp4")) {
             mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.VIDEO_MP4)
         } else if (titleLower.contains(".mkv") || urlLower.contains(".mkv")) {
@@ -754,11 +860,13 @@ class MyStreamPlayerManager(
 
     fun release() {
         tickerJob?.cancel()
+        streamProxyServer.stop()
         try {
             context.unregisterReceiver(becomingNoisyReceiver)
         } catch (e: Exception) {
             // ignore
         }
         player.release()
+        MediaCacheManager.clearCacheAsync()
     }
 }
