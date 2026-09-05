@@ -14,8 +14,8 @@ android {
         applicationId = "com.mystream.app"
         minSdk = 30
         targetSdk = 35
-        versionCode = 18
-        versionName = "1.1.0"
+        versionCode = 19
+        versionName = "1.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
