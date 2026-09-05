@@ -214,22 +214,32 @@ class MyStreamPlayerManager(
             }
         })
 
-    // Continuous streaming LoadControl: overrides shouldContinueLoading to prevent stop-and-go TCP window collapse
+    // Device-adaptive streaming LoadControl: ensures smooth line-speed caching without OOM on Android TV
     private val loadControl: androidx.media3.exoplayer.LoadControl by lazy {
+        val isTv = com.mystream.app.ui.utils.DeviceUtils.isTvDevice(context)
+        val isLowRam = com.mystream.app.ui.utils.DeviceUtils.isLowRamDevice(context)
+        val isConstrainedDevice = isTv || isLowRam
+
+        val targetBufferBytes = if (isConstrainedDevice) 36 * 1024 * 1024 else 100 * 1024 * 1024
+        val minBufferMs = if (isConstrainedDevice) 25_000 else 60_000
+        val maxBufferMs = if (isConstrainedDevice) 50_000 else 120_000
+        val bufferForPlaybackMs = if (isConstrainedDevice) 3_500 else 5_000
+        val bufferForPlaybackAfterRebufferMs = if (isConstrainedDevice) 6_000 else 10_000
+        val minContinuousBufferUs = if (isConstrainedDevice) 20_000_000L else 60_000_000L
+
         object : androidx.media3.exoplayer.DefaultLoadControl(
             androidx.media3.exoplayer.upstream.DefaultAllocator(true, 64 * 1024),
-            /* minBufferMs = */ 120_000,
-            /* maxBufferMs = */ 240_000,
-            /* bufferForPlaybackMs = */ 5_000, // 5s solid startup cushion
-            /* bufferForPlaybackAfterRebufferMs = */ 10_000, // 10s cushion on seek/rebuffer to let TCP window ramp up
-            /* targetBufferBytes = */ 180 * 1024 * 1024,
+            /* minBufferMs = */ minBufferMs,
+            /* maxBufferMs = */ maxBufferMs,
+            /* bufferForPlaybackMs = */ bufferForPlaybackMs,
+            /* bufferForPlaybackAfterRebufferMs = */ bufferForPlaybackAfterRebufferMs,
+            /* targetBufferBytes = */ targetBufferBytes,
             /* prioritizeTimeOverSizeThresholds = */ true,
             /* backBufferDurationMs = */ 0,
             /* retainBackBufferFromKeyframe = */ false
         ) {
             override fun shouldContinueLoading(parameters: androidx.media3.exoplayer.LoadControl.Parameters): Boolean {
-                // Prevent micro-burst choking: always download continuously until at least 90s of video is buffered in RAM
-                if (parameters.bufferedDurationUs < 90_000_000L) {
+                if (parameters.bufferedDurationUs < minContinuousBufferUs) {
                     return true
                 }
                 return super.shouldContinueLoading(parameters)
@@ -452,7 +462,7 @@ class MyStreamPlayerManager(
                         Log.d(TAG, "Player Status: pos=${_currentPosition.value / 1000}s/${_duration.value / 1000}s, buf=${_bufferedPosition.value / 1000}s (${_bufferPercentage.value}%), speed=$speedStr, state=${player.playbackState}, isBuffering=${_isBuffering.value}")
                     }
                 }
-                delay(350)
+                delay(500)
             }
         }
     }

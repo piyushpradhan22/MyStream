@@ -30,3 +30,14 @@
 
 # Coil Image Loader (AAR provides consumer rules)
 -dontwarn coil3.**
+
+# Jetpack Compose Accessibility Optimization for Android TV (defuse Buttons Remapper geometry flood)
+-keep class androidx.compose.ui.platform.AndroidComposeView {
+    androidx.compose.ui.platform.AndroidComposeViewAccessibilityDelegateCompat composeAccessibilityDelegate;
+}
+-keep class androidx.compose.ui.platform.AndroidComposeViewAccessibilityDelegateCompat {
+    java.util.List enabledServices;
+    android.view.accessibility.AccessibilityManager$AccessibilityStateChangeListener enabledStateListener;
+    android.view.accessibility.AccessibilityManager$TouchExplorationStateChangeListener touchExplorationStateListener;
+    android.view.accessibility.AccessibilityManager accessibilityManager;
+}

@@ -14,8 +14,8 @@ android {
         applicationId = "com.mystream.app"
         minSdk = 30
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.0.16"
+        versionCode = 18
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -122,6 +122,12 @@ dependencies {
 
     // DataStore
     implementation(libs.androidx.datastore.preferences)
+
+    // BitTorrent Engine & Embedded Localhost Streaming Server
+    implementation(libs.nanohttpd)
+    implementation(libs.libtorrent4j)
+    implementation(libs.libtorrent4j.arm64)
+    implementation(libs.libtorrent4j.arm)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

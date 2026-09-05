@@ -1,6 +1,6 @@
 {
-  "versionCode": 17,
-  "versionName": "1.0.16",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.0.16/app-universal-release.apk",
-  "changelog": "• 🚀 Local Streaming Proxy: Embedded high-throughput StreamProxyServer on 127.0.0.1 to eliminate buffering stalls on 4K streams\n• ⚡ 4MB High-Throughput Socket Engine: Configured RFC 1323 TCP window scaling (4MB SO_RCVBUF) to unlock 10-20 MB/s over transatlantic CDNs\n• 🎬 Asynchronous MediaCodec: Enabled asynchronous MediaCodec queueing on Android TV hardware decoders for rock-solid 4K HEVC rendering\n• ⚡ Clean 'HF Direct' Row: Clean home screen layout with dedicated HF Direct catalog and instant stream badges\n• 📱 Direct External Player Launch: Passed resolved CDN endpoints to external players (Just Player / VLC) with zero redirect latency"
+  "versionCode": 18,
+  "versionName": "1.1.0",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.1.0/app-universal-release.apk",
+  "changelog": "• 🧲 Native BitTorrent P2P Engine: Restored native libtorrent4j + NanoHTTPD local streaming server for direct magnet streaming without PikPak errors\n• 📊 Real-time P2P Buffering HUD: Dynamic streaming dialog displaying live download speed, peer count, seed count, and progress bar\n• 🎬 Seamless Video Transitions: Preserved persistent background trailer player between Home and Details screens with smooth container animation\n• 🇮🇳 Instant Trailer Switching: Direct in-place player controls for both Official and Hindi trailers with immediate playback\n• 📐 Refined Trailer Layout: Fitted top-right trailer container on Home screen to eliminate top cropping and excessive stretching\n• ⚡ Compact Card Actions: Replaced action button labels with clean PP ☁ badge and removed external player button\n• 🛡️ 5.8 GB Cloud Quota Guard: Restricted direct PikPak action button to files under 5.8 GB to prevent cloud quota limits\n• ↻ Clean Restart Action: Reload button now restarts P2P streams from the beginning ignoring saved position"
 }

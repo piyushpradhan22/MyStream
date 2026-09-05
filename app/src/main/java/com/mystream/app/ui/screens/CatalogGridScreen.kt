@@ -55,8 +55,10 @@ import com.mystream.app.data.model.StremioMetaPreview
 import com.mystream.app.data.repository.SourcesRepository
 import com.mystream.app.ui.components.PosterCard
 import com.mystream.app.ui.theme.BgDark
-import com.mystream.app.ui.theme.FocusRingOrange
+import com.mystream.app.ui.theme.FocusRing
+import com.mystream.app.ui.theme.GlassBorder
 import com.mystream.app.ui.theme.PrimaryNeon
+import com.mystream.app.ui.theme.SurfaceCard
 import com.mystream.app.ui.theme.SurfaceDark
 import com.mystream.app.ui.theme.TextMuted
 import com.mystream.app.ui.theme.TextPrimary
@@ -156,7 +158,7 @@ fun CatalogGridScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BgDark)
+            .background(com.mystream.app.ui.theme.HotstarBg)
     ) {
         Column(
             modifier = Modifier
@@ -184,12 +186,12 @@ fun CatalogGridScreen(
                         interactionSource = backInteraction,
                         modifier = Modifier
                             .size(40.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isBackFocused) FocusRingOrange.copy(alpha = 0.25f) else SurfaceDark)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isBackFocused) FocusRing else SurfaceCard)
                             .border(
                                 if (isBackFocused) 2.dp else 1.dp,
-                                if (isBackFocused) FocusRingOrange else Color(0x22FFFFFF),
-                                RoundedCornerShape(10.dp)
+                                if (isBackFocused) FocusRing else GlassBorder,
+                                RoundedCornerShape(12.dp)
                             )
                             .onPreviewKeyEvent { keyEvent ->
                                 if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
@@ -205,7 +207,7 @@ fun CatalogGridScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = if (isBackFocused) FocusRingOrange else TextPrimary
+                            tint = if (isBackFocused) Color.Black else TextPrimary
                         )
                     }
 
@@ -230,12 +232,13 @@ fun CatalogGridScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(PrimaryNeon.copy(alpha = 0.15f))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .background(SurfaceCard)
+                            .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 9.dp, vertical = 4.5.dp)
                     ) {
                         Text(
                             text = "Infinite Scroll",
-                            color = PrimaryNeon,
+                            color = FocusRing,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -263,7 +266,7 @@ fun CatalogGridScreen(
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 130.dp),
+                    columns = GridCells.Adaptive(minSize = 136.dp),
                     state = gridState,
                     contentPadding = PaddingValues(start = 4.dp, end = 4.dp, bottom = 50.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),

@@ -1,5 +1,12 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.mystream.app.ui.screens
 
+import android.app.Activity
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,99 +19,107 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import com.mystream.app.ui.utils.appTopBarPadding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.AddLink
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.mystream.app.ui.utils.safeRequestFocus
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.mystream.app.data.model.MediaPlaybackItem
-import com.mystream.app.data.model.StremioMetaPreview
-import com.mystream.app.data.repository.SourcesRepository
-import com.mystream.app.ui.components.CustomUrlDialog
-import com.mystream.app.ui.components.PosterCard
-import com.mystream.app.ui.theme.BgDark
-import com.mystream.app.ui.theme.PrimaryNeon
-import com.mystream.app.ui.theme.SecondaryCyan
-import com.mystream.app.ui.theme.SurfaceCard
-import com.mystream.app.ui.theme.SurfaceDark
-import com.mystream.app.ui.theme.TextMuted
-import com.mystream.app.ui.theme.TextPrimary
-import kotlinx.coroutines.launch
-import com.mystream.app.ui.theme.TextSecondary
-
-import androidx.activity.compose.BackHandler
-import androidx.compose.ui.platform.LocalContext
-import android.app.Activity
-import android.content.Intent
-import android.speech.RecognizerIntent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.material.icons.filled.Mic
-import com.mystream.app.ui.components.ExitConfirmationDialog
-import com.mystream.app.ui.theme.FocusRingOrange
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.material.icons.filled.Refresh
-import kotlinx.coroutines.withContext
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.mystream.app.data.model.MediaPlaybackItem
+import com.mystream.app.data.model.PlaybackProgressRecord
+import com.mystream.app.data.model.StremioMetaPreview
+import com.mystream.app.data.model.WatchlistItem
+import com.mystream.app.data.repository.SourcesRepository
+import com.mystream.app.ui.components.CustomUrlDialog
+import com.mystream.app.ui.components.ExitConfirmationDialog
+import com.mystream.app.ui.components.OttHeroSpotlight
+import com.mystream.app.ui.components.OttLeftSidebar
+import com.mystream.app.ui.components.OttNavDestination
+import com.mystream.app.ui.components.PosterCard
+import com.mystream.app.ui.theme.FocusRing
+import com.mystream.app.ui.theme.FocusRingOrange
+import com.mystream.app.ui.theme.GlassBorder
+import com.mystream.app.ui.theme.HotstarBg
+import com.mystream.app.ui.theme.HotstarPillActive
+import com.mystream.app.ui.theme.HotstarPillActiveBg
+import com.mystream.app.ui.theme.HotstarPillInactiveBg
+import com.mystream.app.ui.theme.HotstarPillInactiveText
+import com.mystream.app.ui.theme.PrimaryNeon
+import com.mystream.app.ui.theme.SecondaryCyan
+import com.mystream.app.ui.theme.SurfaceCard
+import com.mystream.app.ui.theme.SurfaceCardFocused
+import com.mystream.app.ui.theme.SurfaceDark
+import com.mystream.app.ui.theme.SurfaceElevated
+import com.mystream.app.ui.theme.TextMuted
+import com.mystream.app.ui.theme.TextPrimary
+import com.mystream.app.ui.theme.TextSecondary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.ui.focus.onFocusChanged
+
+data class OttCategory(
+    val id: String,
+    val title: String,
+    val type: String = "movie",
+    val catalogId: String = "top",
+    val genre: String? = null
+)
 
 @Composable
 fun HomeScreen(
@@ -117,42 +132,33 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val continueWatchingList by repository.continueWatchingFlow.collectAsState(initial = emptyList())
-    val watchlist by repository.watchlistFlow.collectAsState(initial = emptyList())
 
-    val searchFocusRequester = remember { FocusRequester() }
-    val continueWatchingFirstItemFR = remember { FocusRequester() }
-    val watchlistFirstItemFR = remember { FocusRequester() }
-
-    val dynamicRowFirstItemFRs = remember { mutableMapOf<Int, FocusRequester>() }
-    fun getDynamicRowFirstItemFR(index: Int): FocusRequester = dynamicRowFirstItemFRs.getOrPut(index) { FocusRequester() }
-
-    val row1FirstItemFR = remember { FocusRequester() }
-    val row2FirstItemFR = remember { FocusRequester() }
-    val row3FirstItemFR = remember { FocusRequester() }
-    val row4FirstItemFR = remember { FocusRequester() }
-    val row5FirstItemFR = remember { FocusRequester() }
-    val rowHfFirstItemFR = remember { FocusRequester() }
-
-    val rowScrollStates = remember { mutableMapOf<String, androidx.compose.foundation.lazy.LazyListState>() }
-    val continueWatchingListState = rememberLazyListState()
-    val watchlistListState = rememberLazyListState()
-
-    var hfCatalogItems by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var indianCategories by remember { mutableStateOf<List<Pair<String, List<StremioMetaPreview>>>>(emptyList()) }
-
-    var topMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var topSeries by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var actionMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var scifiMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var comedySeries by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-
-    var isLoading by remember { mutableStateOf(true) }
-    var reloadTrigger by remember { mutableIntStateOf(0) }
-    var loadError by remember { mutableStateOf<String?>(null) }
+    // Dialog States
     var showCustomUrlDialog by remember { mutableStateOf(false) }
     var showExitConfirmationDialog by remember { mutableStateOf(false) }
     var showSetupCredentialsDialog by remember { mutableStateOf(false) }
+
+
+
+    if (showExitConfirmationDialog) {
+        ExitConfirmationDialog(
+            onConfirmExit = {
+                (context as? Activity)?.let { act ->
+                    act.finishAffinity()
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                    kotlin.system.exitProcess(0)
+                }
+            },
+            onDismiss = { showExitConfirmationDialog = false }
+        )
+    }
+
+    if (showCustomUrlDialog) {
+        CustomUrlDialog(
+            onDismiss = { showCustomUrlDialog = false },
+            onPlay = { item -> onPlayDirect(item) }
+        )
+    }
 
     LaunchedEffect(Unit) {
         val cfg = repository.getJsonConfig()
@@ -168,80 +174,114 @@ fun HomeScreen(
         )
     }
 
-    // Intercept back button on Home to ask for exit confirmation
+    // Data sources
+    val continueWatchingList: List<PlaybackProgressRecord> by repository.continueWatchingFlow.collectAsState(initial = emptyList())
+    val watchlist: List<WatchlistItem> by repository.watchlistFlow.collectAsState(initial = emptyList())
+    val appSettings by repository.appSettingsFlow.collectAsState(initial = com.mystream.app.data.model.AppSettingsConfig())
+
+    var topMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
+    var topSeries by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
+    var hfCatalogItems by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
+    var indianCategories by remember { mutableStateOf<List<Pair<String, List<StremioMetaPreview>>>>(emptyList()) }
+    var actionMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
+    var scifiMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
+    var comedySeries by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    // Navigation & Category Selection State
+    var selectedNavDestination by remember { mutableStateOf(OttNavDestination.HOME) }
+    var selectedCategoryId by rememberSaveable { mutableStateOf("trending") }
+    val sidebarHomeFocusRequester = remember { FocusRequester() }
+    var isHomeSidebarFocused by remember { mutableStateOf(false) }
+
+    // Intercept back button: highlight Home button on sidebar first, then show exit dialog
     BackHandler(enabled = true) {
-        showExitConfirmationDialog = true
-    }
-
-    if (showExitConfirmationDialog) {
-        ExitConfirmationDialog(
-            onConfirmExit = {
-                (context as? Activity)?.let { act ->
-                    act.finishAffinity()
-                    android.os.Process.killProcess(android.os.Process.myPid())
-                    kotlin.system.exitProcess(0)
-                }
-            },
-            onDismiss = {
-                showExitConfirmationDialog = false
-            }
-        )
-    }
-
-    val listState = rememberLazyListState()
-
-    LaunchedEffect(isLoading, continueWatchingList.size, hfCatalogItems.size) {
-        if (!isLoading) {
-            kotlinx.coroutines.delay(120)
+        android.util.Log.d("HomeScreenBack", "BackHandler triggered! isHomeSidebarFocused=$isHomeSidebarFocused")
+        if (!isHomeSidebarFocused) {
             try {
-                if (continueWatchingList.isNotEmpty()) {
-                    continueWatchingFirstItemFR.requestFocus()
-                } else if (hfCatalogItems.isNotEmpty()) {
-                    rowHfFirstItemFR.requestFocus()
-                } else {
-                    searchFocusRequester.requestFocus()
-                }
-                listState.scrollToItem(0, 0)
-            } catch (_: Exception) {
-                // ignore
+                selectedNavDestination = OttNavDestination.HOME
+                val ok = sidebarHomeFocusRequester.requestFocus()
+                android.util.Log.d("HomeScreenBack", "sidebarHomeFocusRequester.requestFocus() returned: $ok")
+            } catch (e: Exception) {
+                android.util.Log.e("HomeScreenBack", "sidebarHomeFocusRequester.requestFocus() threw exception", e)
+                showExitConfirmationDialog = true
             }
+        } else {
+            android.util.Log.d("HomeScreenBack", "Already focused on home sidebar, showing exit dialog")
+            showExitConfirmationDialog = true
         }
     }
 
-    LaunchedEffect(reloadTrigger) {
-        if (topMovies.isEmpty() && indianCategories.isEmpty()) {
-            isLoading = true
+    // Hero Spotlight State
+    var focusedItem by remember { mutableStateOf<StremioMetaPreview?>(null) }
+    var currentTrailerYtId by remember { mutableStateOf<String?>(null) }
+    // User requested: "Make sure background trailer audio is playing"
+    var isTrailerAudioMuted by remember { mutableStateOf(false) }
+
+    // Focus Management
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val searchFocusRequester = remember { FocusRequester() }
+    val playHeroFocusRequester = remember { FocusRequester() }
+    val categoryPillFirstItemFR = remember { FocusRequester() }
+    var focusedCardIndex by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
+    val cardFocusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
+    val categoryPillFocusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
+    val carouselListState = rememberLazyListState(initialFirstVisibleItemIndex = focusedCardIndex)
+    var isLoadingMoreCategoryItems by remember { mutableStateOf(false) }
+    var isRestoringFocus by remember { mutableStateOf(false) }
+
+    var lastActiveCategoryId by remember { mutableStateOf(selectedCategoryId) }
+    LaunchedEffect(selectedCategoryId) {
+        if (selectedCategoryId != lastActiveCategoryId) {
+            lastActiveCategoryId = selectedCategoryId
+            cardFocusRequesters.clear()
+            focusedCardIndex = 0
+            try {
+                carouselListState.scrollToItem(0)
+            } catch (_: Exception) {}
         }
-        loadError = null
+    }
+
+    // Fetch Catalogs in Parallel
+    LaunchedEffect(Unit) {
+        isLoading = true
         try {
             coroutineScope {
                 launch(Dispatchers.IO) {
                     try {
-                        val allIndian = repository.getAllIndianCategories()
-                        indianCategories = allIndian
-                    } catch (e: Exception) {
-                        android.util.Log.e("HomeScreen", "Error loading all Indian categories", e)
-                    }
-                }
-
-                launch(Dispatchers.IO) {
-                    try {
                         val moviesRes = repository.fetchCatalog("movie", "top", skip = 0)
                         topMovies = moviesRes.metas
+                        if (focusedItem == null && moviesRes.metas.isNotEmpty()) {
+                            focusedItem = moviesRes.metas.first()
+                        }
                     } catch (e: Exception) {
                         android.util.Log.e("HomeScreen", "Error loading top movies", e)
                     }
                 }
-
                 launch(Dispatchers.IO) {
                     try {
                         val seriesRes = repository.fetchCatalog("series", "top", skip = 0)
                         topSeries = seriesRes.metas
                     } catch (e: Exception) {
-                        android.util.Log.e("HomeScreen", "Error loading top series", e)
+                        android.util.Log.e("HomeScreen", "Error loading series", e)
                     }
                 }
-
+                launch(Dispatchers.IO) {
+                    try {
+                        val hfRes = repository.fetchHfCatalog(skip = 0, limit = 30)
+                        hfCatalogItems = hfRes.metas
+                    } catch (e: Exception) {
+                        android.util.Log.e("HomeScreen", "Error loading HF catalog", e)
+                    }
+                }
+                launch(Dispatchers.IO) {
+                    try {
+                        val indian = repository.getAllIndianCategories()
+                        indianCategories = indian
+                    } catch (e: Exception) {
+                        android.util.Log.e("HomeScreen", "Error loading Indian categories", e)
+                    }
+                }
                 launch(Dispatchers.IO) {
                     try {
                         val actionRes = repository.fetchCatalog("movie", "top", genre = "Action", skip = 0)
@@ -250,16 +290,14 @@ fun HomeScreen(
                         android.util.Log.e("HomeScreen", "Error loading action movies", e)
                     }
                 }
-
                 launch(Dispatchers.IO) {
                     try {
                         val scifiRes = repository.fetchCatalog("movie", "top", genre = "Sci-Fi", skip = 0)
                         scifiMovies = scifiRes.metas
                     } catch (e: Exception) {
-                        android.util.Log.e("HomeScreen", "Error loading scifi movies", e)
+                        android.util.Log.e("HomeScreen", "Error loading sci-fi movies", e)
                     }
                 }
-
                 launch(Dispatchers.IO) {
                     try {
                         val comedyRes = repository.fetchCatalog("series", "top", genre = "Comedy", skip = 0)
@@ -268,584 +306,801 @@ fun HomeScreen(
                         android.util.Log.e("HomeScreen", "Error loading comedy series", e)
                     }
                 }
-
-                launch(Dispatchers.IO) {
-                    try {
-                        val hfRes = repository.fetchHfCatalog(skip = 0, limit = 30)
-                        hfCatalogItems = hfRes.metas
-                    } catch (e: Exception) {
-                        android.util.Log.e("HomeScreen", "Error loading HuggingFace catalog", e)
-                    }
-                }
             }
         } finally {
             isLoading = false
         }
     }
 
-    if (showCustomUrlDialog) {
-        CustomUrlDialog(
-            onDismiss = { showCustomUrlDialog = false },
-            onPlay = { item ->
-                onPlayDirect(item)
+    // Set initial focused item if continue watching is available
+    LaunchedEffect(continueWatchingList, topMovies) {
+        if (focusedItem == null) {
+            val firstRecord = continueWatchingList.firstOrNull()
+            if (firstRecord != null) {
+                focusedItem = StremioMetaPreview(
+                    id = firstRecord.imdbId,
+                    type = firstRecord.type,
+                    name = firstRecord.title,
+                    poster = firstRecord.posterUrl,
+                    genres = listOfNotNull(firstRecord.subtitle)
+                )
+                selectedCategoryId = "continue_watching"
+            } else if (topMovies.isNotEmpty()) {
+                focusedItem = topMovies.first()
             }
+        }
+    }
+
+    // Enrich Continue Watching items with IMDB metadata in background
+    var enrichedCwMeta by remember { mutableStateOf<Map<String, StremioMetaPreview>>(emptyMap()) }
+    LaunchedEffect(continueWatchingList) {
+        if (continueWatchingList.isEmpty()) return@LaunchedEffect
+        val enriched = mutableMapOf<String, StremioMetaPreview>()
+        continueWatchingList.forEach { record ->
+            try {
+                val meta = repository.fetchMetaDetail(record.type, record.imdbId)
+                enriched[record.imdbId] = StremioMetaPreview(
+                    id = record.imdbId,
+                    type = record.type,
+                    name = record.title,
+                    poster = record.posterUrl ?: meta.poster,
+                    background = record.backdropUrl ?: meta.background,
+                    imdbRating = meta.imdbRating,
+                    year = meta.year ?: meta.releaseInfo,
+                    releaseInfo = meta.releaseInfo ?: meta.year,
+                    genres = if (meta.genres.isNotEmpty()) meta.genres else listOfNotNull(record.subtitle),
+                    description = meta.description
+                )
+            } catch (_: Exception) { /* graceful degradation */ }
+        }
+        enrichedCwMeta = enriched
+    }
+
+
+
+    // Debounced Background Trailer Loading with Audio & Metadata Enrichment
+    LaunchedEffect(focusedItem?.id) {
+        currentTrailerYtId = null
+        val item = focusedItem ?: return@LaunchedEffect
+        // 900ms debounce ensures rapid D-pad scrolling is silky smooth
+        delay(900)
+        try {
+            val meta = repository.fetchMetaDetail(item.type, item.id)
+            var trailerId = meta.effectiveTrailerYtId
+            if (trailerId.isNullOrBlank()) {
+                // Autoplay Hindi trailer fallback by default if official is unavailable
+                trailerId = repository.searchYouTubeTrailer(meta.name, meta.year, "Hindi")
+            }
+            currentTrailerYtId = trailerId
+            focusedItem = focusedItem?.copy(
+                imdbRating = if (!meta.imdbRating.isNullOrBlank()) meta.imdbRating else focusedItem?.imdbRating,
+                year = meta.year ?: meta.releaseInfo ?: focusedItem?.year,
+                releaseInfo = meta.releaseInfo ?: meta.year ?: focusedItem?.releaseInfo,
+                description = if (!meta.description.isNullOrBlank()) meta.description else focusedItem?.description,
+                genres = if (meta.genres.isNotEmpty()) meta.genres else focusedItem?.genres ?: emptyList(),
+                background = meta.background ?: focusedItem?.background
+            )
+        } catch (e: Exception) {
+            android.util.Log.d("HomeScreen", "Trailer not available for ${item.name}: ${e.message}")
+        }
+    }
+
+    // Dynamic categories list (Preserving exact original labels)
+    val categories = remember(continueWatchingList.size, watchlist.size, hfCatalogItems.size, indianCategories.size) {
+        val list = mutableListOf<OttCategory>()
+        if (continueWatchingList.isNotEmpty()) {
+            list.add(OttCategory("continue_watching", "Continue Watching"))
+        }
+        if (hfCatalogItems.isNotEmpty()) {
+            list.add(OttCategory("hf_direct", "⚡ HF Direct", type = "movie", catalogId = "hftor"))
+        }
+        indianCategories.forEachIndexed { index, pair ->
+            list.add(OttCategory("indian_$index", pair.first))
+        }
+        list.add(OttCategory("trending", "Popular Movies", type = "movie", catalogId = "top"))
+        list.add(OttCategory("series", "Popular Series", type = "series", catalogId = "top"))
+        list.add(OttCategory("action", "Action & Adventure", type = "movie", catalogId = "top", genre = "Action"))
+        list.add(OttCategory("scifi", "Sci-Fi & Thriller", type = "movie", catalogId = "top", genre = "Sci-Fi"))
+        list.add(OttCategory("comedy", "Binge-Worthy Comedies", type = "series", catalogId = "top", genre = "Comedy"))
+        if (watchlist.isNotEmpty()) {
+            list.add(OttCategory("watchlist", "My Watchlist"))
+        }
+        list
+    }
+
+    // Get items for currently selected category
+    val currentCategoryItems: List<StremioMetaPreview> = remember(
+        selectedCategoryId,
+        continueWatchingList,
+        enrichedCwMeta,
+        topMovies,
+        topSeries,
+        hfCatalogItems,
+        indianCategories,
+        actionMovies,
+        scifiMovies,
+        comedySeries,
+        watchlist
+    ) {
+        when {
+            selectedCategoryId == "continue_watching" -> continueWatchingList.map { record: PlaybackProgressRecord ->
+                // Use enriched metadata if available, else fallback to raw record data
+                enrichedCwMeta[record.imdbId] ?: StremioMetaPreview(
+                    id = record.imdbId,
+                    type = record.type,
+                    name = record.title,
+                    poster = record.posterUrl,
+                    background = record.backdropUrl,
+                    genres = listOfNotNull(record.subtitle)
+                )
+            }
+            selectedCategoryId == "trending" -> topMovies
+            selectedCategoryId == "series" -> topSeries
+            selectedCategoryId == "hf_direct" -> hfCatalogItems
+            selectedCategoryId.startsWith("indian_") -> {
+                val index = selectedCategoryId.substringAfter("indian_").toIntOrNull() ?: 0
+                indianCategories.getOrNull(index)?.second ?: emptyList()
+            }
+            selectedCategoryId == "action" -> actionMovies
+            selectedCategoryId == "scifi" -> scifiMovies
+            selectedCategoryId == "comedy" -> comedySeries
+            selectedCategoryId == "watchlist" -> watchlist.map { item: WatchlistItem ->
+                StremioMetaPreview(
+                    id = item.imdbId,
+                    type = item.type,
+                    name = item.title,
+                    poster = item.posterUrl,
+                    background = item.backdropUrl,
+                    genres = listOfNotNull(item.subtitle ?: item.torrentQuality)
+                )
+            }
+            else -> topMovies
+        }
+    }
+
+    val isCurrentItemWatchlisted = remember(focusedItem?.id, watchlist) {
+        focusedItem?.let { item -> watchlist.any { it.imdbId == item.id } } ?: false
+    }
+
+    // Robust card focus helper: scrolls to card and requests focus with retry
+    suspend fun focusCardAtIndex(index: Int) {
+        if (currentCategoryItems.isEmpty()) return
+        val targetIdx = index.coerceIn(0, (currentCategoryItems.size - 1).coerceAtLeast(0))
+        focusedCardIndex = targetIdx
+        currentCategoryItems.getOrNull(targetIdx)?.let { focusedItem = it }
+        try {
+            carouselListState.scrollToItem(targetIdx)
+        } catch (_: Exception) {}
+        for (retry in 0..6) {
+            delay(50)
+            val fr = cardFocusRequesters[targetIdx]
+            if (fr != null && fr.safeRequestFocus()) {
+                break
+            }
+        }
+    }
+
+    // Auto-focus first card in bottom carousel on initial load (defaults to first card of Continue Watching)
+    var hasRequestedInitialFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(currentCategoryItems.isNotEmpty()) {
+        if (!hasRequestedInitialFocus && currentCategoryItems.isNotEmpty()) {
+            hasRequestedInitialFocus = true
+            focusCardAtIndex(focusedCardIndex)
+        }
+    }
+
+    // Restore focus and preserve highlighted card when returning from DetailScreen
+    var isFirstResume by remember { mutableStateOf(true) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (isFirstResume) {
+                    isFirstResume = false
+                } else {
+                    isRestoringFocus = true
+                    scope.launch {
+                        focusCardAtIndex(focusedCardIndex)
+                        delay(200)
+                        isRestoringFocus = false
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Main JioHotstar OTT Layout: Left Sidebar + Main Content (Spotlight + Middle Carousel + Very Bottom Category Pills)
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Transparent)
+    ) {
+        // 1. Left Navigation Rail (Narrow 52dp Glass Sidebar)
+        OttLeftSidebar(
+            selectedDestination = selectedNavDestination,
+            onSelectDestination = { dest ->
+                selectedNavDestination = dest
+                when (dest) {
+                    OttNavDestination.SEARCH -> onNavigateToSearch()
+                    OttNavDestination.SETTINGS -> onNavigateToSources()
+                    OttNavDestination.CUSTOM_URL -> showCustomUrlDialog = true
+                    OttNavDestination.MOVIES -> {
+                        selectedCategoryId = "trending"
+                        if (topMovies.isNotEmpty()) focusedItem = topMovies.first()
+                    }
+                    OttNavDestination.SERIES -> {
+                        selectedCategoryId = "series"
+                        if (topSeries.isNotEmpty()) focusedItem = topSeries.first()
+                    }
+                    OttNavDestination.WATCHLIST -> {
+                        selectedCategoryId = "watchlist"
+                        val first = watchlist.firstOrNull()
+                        if (first != null) {
+                            focusedItem = StremioMetaPreview(
+                                id = first.imdbId,
+                                type = first.type,
+                                name = first.title,
+                                poster = first.posterUrl
+                            )
+                        }
+                    }
+                    OttNavDestination.HOME -> {
+                        selectedCategoryId = if (continueWatchingList.isNotEmpty()) "continue_watching" else "trending"
+                    }
+                }
+            },
+            onNavigateRight = {
+                try {
+                    val targetFR = cardFocusRequesters[focusedCardIndex] ?: cardFocusRequesters[0] ?: playHeroFocusRequester
+                    targetFR.requestFocus()
+                } catch (_: Exception) {
+                    try { playHeroFocusRequester.requestFocus() } catch (_: Exception) {}
+                }
+            },
+            searchFocusRequester = searchFocusRequester,
+            homeFocusRequester = sidebarHomeFocusRequester,
+            onHomeFocusChanged = { isHomeSidebarFocused = it }
         )
+
+        // 2. Main OTT Content Showcase
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .weight(1f)
+        ) {
+            // Top Section (53% Height): Hero Spotlight with Ambient Video Trailer & Audio
+            OttHeroSpotlight(
+                item = focusedItem,
+                trailerYtId = currentTrailerYtId,
+                isTrailerPlaybackEnabled = appSettings.trailerPlaybackEnabled,
+                isAudioMuted = appSettings.trailerAudioMuted,
+                isWatchlisted = isCurrentItemWatchlisted,
+                onToggleTrailerPlayback = {
+                    scope.launch {
+                        repository.updateAppSettings(
+                            appSettings.copy(trailerPlaybackEnabled = !appSettings.trailerPlaybackEnabled)
+                        )
+                    }
+                },
+                onToggleAudioMute = {
+                    scope.launch {
+                        repository.updateAppSettings(
+                            appSettings.copy(trailerAudioMuted = !appSettings.trailerAudioMuted)
+                        )
+                    }
+                },
+                onToggleWatchlist = {
+                    focusedItem?.let { item ->
+                        scope.launch {
+                            val existing = watchlist.firstOrNull { it.imdbId == item.id }
+                            if (existing != null) {
+                                repository.removeFromWatchlist(existing.id)
+                            } else {
+                                repository.addToWatchlist(
+                                    WatchlistItem(
+                                        id = item.id,
+                                        imdbId = item.id,
+                                        title = item.name,
+                                        type = item.type,
+                                        posterUrl = item.poster,
+                                        subtitle = item.genres.firstOrNull()
+                                    )
+                                )
+                            }
+                        }
+                    }
+                },
+                onNavigateDownToContent = {
+                    val targetFR = cardFocusRequesters[focusedCardIndex] ?: cardFocusRequesters[0]
+                    if (targetFR != null) {
+                        try { targetFR.requestFocus() } catch (_: Exception) { focusManager.moveFocus(FocusDirection.Down) }
+                    } else {
+                        focusManager.moveFocus(FocusDirection.Down)
+                    }
+                },
+                onNavigateLeftToSidebar = {
+                    try { searchFocusRequester.requestFocus() } catch (_: Exception) {}
+                },
+                watchlistFocusRequester = playHeroFocusRequester,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(0.53f)
+            )
+
+            // Bottom Section (47% Height): Middle Carousel + Very Bottom Category Pills
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(0.47f)
+                    .background(HotstarBg)
+                    .padding(bottom = 4.dp)
+            ) {
+                // Middle: Single Category Cards Carousel Row
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    if (isLoading && currentCategoryItems.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = FocusRing,
+                                modifier = Modifier.size(28.dp),
+                                strokeWidth = 2.dp
+                            )
+                        }
+                    } else {
+                        val activeCategory = categories.find { it.id == selectedCategoryId }
+
+                        // Infinite scroll pagination when user nears end of category row
+                        LaunchedEffect(carouselListState.firstVisibleItemIndex, focusedCardIndex, currentCategoryItems.size, selectedCategoryId) {
+                            if (isLoadingMoreCategoryItems) return@LaunchedEffect
+                            val cat = activeCategory ?: return@LaunchedEffect
+                            if (cat.id == "continue_watching" || cat.id == "watchlist") return@LaunchedEffect
+
+                            val threshold = (currentCategoryItems.size - 5).coerceAtLeast(0)
+                            val shouldLoad = currentCategoryItems.size >= 10 &&
+                                    (focusedCardIndex >= threshold || carouselListState.firstVisibleItemIndex >= (threshold - 1).coerceAtLeast(0))
+
+                            if (shouldLoad) {
+                                isLoadingMoreCategoryItems = true
+                                try {
+                                    val nextSkip = currentCategoryItems.size
+                                    if (cat.id.startsWith("indian_")) {
+                                        val idx = cat.id.substringAfter("indian_").toIntOrNull() ?: 0
+                                        val catTitle = indianCategories.getOrNull(idx)?.first
+                                        if (catTitle != null) {
+                                            val res = repository.fetchIndianCatalog(category = catTitle, skip = nextSkip, limit = 20)
+                                            if (res.metas.isNotEmpty()) {
+                                                val updated = indianCategories.toMutableList()
+                                                val (cName, existing) = updated[idx]
+                                                updated[idx] = cName to (existing + res.metas).distinctBy { it.id }
+                                                indianCategories = updated
+                                            }
+                                        }
+                                    } else if (cat.id == "hf_direct") {
+                                        val res = repository.fetchHfCatalog(skip = nextSkip, limit = 30)
+                                        if (res.metas.isNotEmpty()) {
+                                            hfCatalogItems = (hfCatalogItems + res.metas).distinctBy { it.id }
+                                        }
+                                    } else {
+                                        val res = repository.fetchCatalog(
+                                            type = cat.type,
+                                            catalogId = cat.catalogId,
+                                            genre = cat.genre,
+                                            skip = nextSkip
+                                        )
+                                        if (res.metas.isNotEmpty()) {
+                                            when (selectedCategoryId) {
+                                                "trending" -> topMovies = (topMovies + res.metas).distinctBy { it.id }
+                                                "series" -> topSeries = (topSeries + res.metas).distinctBy { it.id }
+                                                "action" -> actionMovies = (actionMovies + res.metas).distinctBy { it.id }
+                                                "scifi" -> scifiMovies = (scifiMovies + res.metas).distinctBy { it.id }
+                                                "comedy" -> comedySeries = (comedySeries + res.metas).distinctBy { it.id }
+                                            }
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.e("HomeScreen", "Pagination error for $selectedCategoryId", e)
+                                } finally {
+                                    isLoadingMoreCategoryItems = false
+                                }
+                            }
+                        }
+
+                        LazyRow(
+                            state = carouselListState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(vertical = 2.dp),
+                            contentPadding = PaddingValues(horizontal = 24.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            itemsIndexed(
+                                items = currentCategoryItems,
+                                key = { _, item -> "${selectedCategoryId}_${item.id}" },
+                                contentType = { _, _ -> "poster" }
+                            ) { index, meta ->
+                                val isFirstCard = index == 0
+                                val progressFraction = if (selectedCategoryId == "continue_watching") {
+                                    continueWatchingList.firstOrNull { it.imdbId == meta.id }?.progressFraction
+                                } else null
+                                val cardFR = cardFocusRequesters.getOrPut(index) { FocusRequester() }
+
+                                PosterCard(
+                                    item = meta,
+                                    width = 110,
+                                    progressFraction = progressFraction,
+                                    modifier = Modifier
+                                        .focusRequester(cardFR)
+                                        .onFocusChanged { focusState ->
+                                            if (focusState.isFocused) {
+                                                if (!isRestoringFocus || index == focusedCardIndex) {
+                                                    focusedItem = meta
+                                                    focusedCardIndex = index
+                                                }
+                                            }
+                                        }
+                                        .onPreviewKeyEvent { keyEvent ->
+                                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                                when (keyEvent.key) {
+                                                    Key.DirectionLeft -> {
+                                                        if (isFirstCard) {
+                                                            try { sidebarHomeFocusRequester.requestFocus(); true } catch (_: Exception) { false }
+                                                        } else {
+                                                            false // Let Compose LazyRow handle natural left scrolling & focus
+                                                        }
+                                                    }
+                                                    Key.DirectionRight -> {
+                                                        false // Let Compose LazyRow handle natural right scrolling & focus
+                                                    }
+                                                    Key.DirectionUp -> {
+                                                        try {
+                                                            playHeroFocusRequester.requestFocus()
+                                                            true
+                                                        } catch (_: Exception) {
+                                                            focusManager.moveFocus(FocusDirection.Up)
+                                                        }
+                                                    }
+                                                    Key.DirectionDown -> {
+                                                        val activePillIndex = categories.indexOfFirst { it.id == selectedCategoryId }.coerceAtLeast(0)
+                                                        val pillFR = categoryPillFocusRequesters[activePillIndex] ?: categoryPillFirstItemFR
+                                                        try {
+                                                             pillFR.requestFocus()
+                                                             true
+                                                        } catch (_: Exception) {
+                                                            focusManager.moveFocus(FocusDirection.Down)
+                                                        }
+                                                    }
+                                                    else -> false
+                                                }
+                                            } else false
+                                        },
+                                    onClick = {
+                                        focusedItem = meta
+                                        onNavigateToDetail(meta.type, meta.id)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // VERY BOTTOM: Category Switcher Pills Row (Hotstar Style)
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 24.dp, end = 24.dp, bottom = 4.dp, top = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    itemsIndexed(categories) { index, category ->
+                        val isSelected = category.id == selectedCategoryId
+                        val pillFR = categoryPillFocusRequesters.getOrPut(index) { FocusRequester() }
+
+                        CategoryPill(
+                            title = category.title,
+                            isSelected = isSelected,
+                            focusRequester = pillFR,
+                            onClick = {
+                                selectedCategoryId = category.id
+                                val firstItem = currentCategoryItems.firstOrNull()
+                                if (firstItem != null) {
+                                    focusedItem = firstItem
+                                }
+                            },
+                            onNavigateDown = {
+                                // Already at bottom edge
+                            },
+                            onNavigateUp = {
+                                val targetIndex = focusedCardIndex.coerceIn(0, (currentCategoryItems.size - 1).coerceAtLeast(0))
+                                val targetFR = cardFocusRequesters[targetIndex] ?: cardFocusRequesters[0]
+                                if (targetFR != null) {
+                                    try {
+                                        targetFR.requestFocus()
+                                    } catch (_: Exception) {
+                                        focusManager.moveFocus(FocusDirection.Up)
+                                    }
+                                } else {
+                                    focusManager.moveFocus(FocusDirection.Up)
+                                }
+                            },
+                            onNavigateLeft = if (index == 0) {
+                                {
+                                    try { sidebarHomeFocusRequester.requestFocus() } catch (_: Exception) {}
+                                }
+                            } else null
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryPill(
+    title: String,
+    isSelected: Boolean,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+    onNavigateDown: () -> Unit,
+    onNavigateUp: () -> Unit,
+    onNavigateLeft: (() -> Unit)? = null
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    val bg = when {
+        isFocused -> FocusRing.copy(alpha = 0.25f)
+        isSelected -> HotstarPillActiveBg
+        else -> HotstarPillInactiveBg
+    }
+
+    val textColor = when {
+        isFocused -> TextPrimary
+        isSelected -> HotstarPillActive
+        else -> HotstarPillInactiveText
+    }
+
+    val border = when {
+        isFocused -> androidx.compose.foundation.BorderStroke(1.5.dp, FocusRing)
+        isSelected -> androidx.compose.foundation.BorderStroke(1.dp, HotstarPillActive.copy(alpha = 0.6f))
+        else -> androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
     }
 
     Box(
         modifier = Modifier
-            .fillMaxSize()
-            .background(BgDark)
-    ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 40.dp)
-        ) {
-            // Lightweight Top Search & Navigation Bar in item 0
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .appTopBarPadding(additionalTop = 12.dp)
-                        .padding(horizontal = 16.dp)
-                        .padding(bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Brand Logo Icon Only (Text label removed)
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(PrimaryNeon),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayCircle,
-                            contentDescription = "MyStream",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-
-                    // Dynamically resizing Search Bar (fits portrait mobile and landscape TV)
-                    val searchInteraction = remember { MutableInteractionSource() }
-                    val isSearchFocused by searchInteraction.collectIsFocusedAsState()
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(42.dp)
-                            .clip(RoundedCornerShape(21.dp))
-                            .background(if (isSearchFocused) FocusRingOrange.copy(alpha = 0.22f) else Color(0x6607090E))
-                            .border(
-                                width = if (isSearchFocused) 2.dp else 1.dp,
-                                color = if (isSearchFocused) FocusRingOrange else Color(0x33FFFFFF),
-                                shape = RoundedCornerShape(21.dp)
-                            )
-                            .focusRequester(searchFocusRequester)
-                            .focusable(interactionSource = searchInteraction)
-                            .onPreviewKeyEvent { keyEvent ->
-                                if (keyEvent.type == KeyEventType.KeyDown) {
-                                    when (keyEvent.key) {
-                                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                                            onNavigateToSearch()
-                                            true
-                                        }
-                                        Key.DirectionDown -> {
-                                            try {
-                                                if (continueWatchingList.isNotEmpty()) {
-                                                    continueWatchingFirstItemFR.requestFocus()
-                                                } else if (hfCatalogItems.isNotEmpty()) {
-                                                    rowHfFirstItemFR.requestFocus()
-                                                } else if (watchlist.isNotEmpty()) {
-                                                    watchlistFirstItemFR.requestFocus()
-                                                } else if (indianCategories.isNotEmpty()) {
-                                                    getDynamicRowFirstItemFR(0).requestFocus()
-                                                } else {
-                                                    row1FirstItemFR.requestFocus()
-                                                }
-                                                true
-                                            } catch (_: Exception) {
-                                                false
-                                            }
-                                        }
-                                        else -> false
-                                    }
-                                } else false
-                            }
-                            .clickable(interactionSource = searchInteraction, indication = null, onClick = onNavigateToSearch)
-                            .padding(horizontal = 14.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = if (isSearchFocused) FocusRingOrange else SecondaryCyan,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "Search movies, series, cast...",
-                            color = if (isSearchFocused) TextPrimary else TextMuted,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    // Right Action Buttons (Custom URL & Settings)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        IconButton(
-                            onClick = { showCustomUrlDialog = true },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AddLink,
-                                contentDescription = "Play Custom URL / Magnet",
-                                tint = PrimaryNeon,
-                                modifier = Modifier.size(22.dp)
-                            )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .clip(RoundedCornerShape(16.dp))
+            .background(bg)
+            .border(border.width, border.brush, RoundedCornerShape(16.dp))
+            .focusable(interactionSource = interactionSource)
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type == KeyEventType.KeyDown) {
+                    when (keyEvent.key) {
+                        Key.DirectionDown -> {
+                            onNavigateDown()
+                            true
                         }
-
-                        IconButton(
-                            onClick = onNavigateToSources,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Settings & Providers",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(22.dp)
-                            )
+                        Key.DirectionUp -> {
+                            onNavigateUp()
+                            true
                         }
+                        Key.DirectionLeft -> {
+                            if (onNavigateLeft != null) {
+                                onNavigateLeft()
+                                true
+                            } else false
+                        }
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                            onClick()
+                            true
+                        }
+                        else -> false
                     }
-                }
-                Spacer(modifier = Modifier.height(10.dp))
+                } else false
             }
-
-                // Continue Watching Section
-                if (continueWatchingList.isNotEmpty()) {
-                    item {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 20.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = "Continue Watching",
-                                        color = TextPrimary,
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(PrimaryNeon.copy(alpha = 0.15f))
-                                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    ) {
-                                        Text(
-                                            text = "${continueWatchingList.size}",
-                                            color = PrimaryNeon,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-
-                                // Clear All button
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(SurfaceCard)
-                                        .clickable {
-                                            scope.launch {
-                                                repository.clearAllPlaybackProgress()
-                                            }
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "Clear All",
-                                        color = TextMuted,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-
-                            LazyRow(
-                                state = continueWatchingListState,
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                itemsIndexed(continueWatchingList, key = { _, record -> record.mediaId }) { index, record ->
-                                    val preview = StremioMetaPreview(
-                                        id = record.imdbId,
-                                        type = record.type,
-                                        name = record.title,
-                                        poster = record.posterUrl,
-                                        genres = listOfNotNull(record.subtitle)
-                                    )
-                                    PosterCard(
-                                        item = preview,
-                                        progressFraction = record.progressFraction,
-                                        modifier = if (index == 0) Modifier.focusRequester(continueWatchingFirstItemFR) else Modifier,
-                                        onClearClick = {
-                                            scope.launch {
-                                                repository.removePlaybackProgress(record.mediaId)
-                                            }
-                                        },
-                                        onClick = {
-                                            onNavigateToDetail(record.type, record.imdbId)
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // HF Direct Catalog Row (HuggingFace)
-                if (hfCatalogItems.isNotEmpty()) {
-                    item {
-                        MediaCatalogRow(
-                            title = "⚡ HF Direct",
-                            items = hfCatalogItems,
-                            scrollState = rowScrollStates.getOrPut("cat_hf_direct") { androidx.compose.foundation.lazy.LazyListState() },
-                            firstItemFocusRequester = rowHfFirstItemFR,
-                            onSeeMoreClick = {
-                                onNavigateToCatalog("⚡ HF Direct", "movie", "hftor", null)
-                            },
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
-                        )
-                    }
-                }
-
-                // Watchlist Section
-                if (watchlist.isNotEmpty()) {
-                    item {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 20.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = "My Watchlist",
-                                        color = TextPrimary,
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(SecondaryCyan.copy(alpha = 0.15f))
-                                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    ) {
-                                        Text(
-                                            text = "${watchlist.size}",
-                                            color = SecondaryCyan,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-
-                                // Clear All button
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(SurfaceCard)
-                                        .clickable {
-                                            scope.launch {
-                                                repository.clearAllWatchlist()
-                                            }
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "Clear All",
-                                        color = TextMuted,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-
-                            LazyRow(
-                                state = watchlistListState,
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                itemsIndexed(watchlist, key = { _, item -> item.id }) { index, item ->
-                                    val preview = StremioMetaPreview(
-                                        id = item.imdbId,
-                                        type = item.type,
-                                        name = item.title,
-                                        poster = item.posterUrl,
-                                        genres = listOfNotNull(item.subtitle ?: item.torrentQuality)
-                                    )
-                                    PosterCard(
-                                        item = preview,
-                                        progressFraction = null,
-                                        modifier = if (index == 0) Modifier.focusRequester(watchlistFirstItemFR) else Modifier,
-                                        onClearClick = {
-                                            scope.launch {
-                                                repository.removeFromWatchlist(item.id)
-                                            }
-                                        },
-                                        onClick = {
-                                            onNavigateToDetail(item.type, item.imdbId)
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-
-
-                // All Indian Categories from data.json (preserving exact original names)
-                itemsIndexed(indianCategories, key = { _, pair -> "indian_${pair.first}" }) { idx, pair ->
-                    val (catKey, catItems) = pair
-                    MediaCatalogRow(
-                        title = catKey,
-                        items = catItems,
-                        scrollState = rowScrollStates.getOrPut("indian_$catKey") { androidx.compose.foundation.lazy.LazyListState() },
-                        firstItemFocusRequester = getDynamicRowFirstItemFR(idx),
-                        onSeeMoreClick = {
-                            onNavigateToCatalog(catKey, "movie", "imdb-indian", catKey)
-                        },
-                        onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
-                    )
-                }
-
-                // Category 1: Popular Movies
-                if (topMovies.isNotEmpty()) {
-                    item {
-                        MediaCatalogRow(
-                            title = "Popular Movies",
-                            items = topMovies,
-                            scrollState = rowScrollStates.getOrPut("cat_top_movies") { androidx.compose.foundation.lazy.LazyListState() },
-                            firstItemFocusRequester = row1FirstItemFR,
-                            onSeeMoreClick = {
-                                onNavigateToCatalog("Popular Movies", "movie", "top", null)
-                            },
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
-                        )
-                    }
-                }
-
-                // Category 2: Popular Series
-                if (topSeries.isNotEmpty()) {
-                    item {
-                        MediaCatalogRow(
-                            title = "Popular Series",
-                            items = topSeries,
-                            scrollState = rowScrollStates.getOrPut("cat_top_series") { androidx.compose.foundation.lazy.LazyListState() },
-                            firstItemFocusRequester = row2FirstItemFR,
-                            onSeeMoreClick = {
-                                onNavigateToCatalog("Popular Series", "series", "top", null)
-                            },
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
-                        )
-                    }
-                }
-
-                // Category 3: Action & Adventure
-                if (actionMovies.isNotEmpty()) {
-                    item {
-                        MediaCatalogRow(
-                            title = "Action & Adventure",
-                            items = actionMovies,
-                            scrollState = rowScrollStates.getOrPut("cat_action_movies") { androidx.compose.foundation.lazy.LazyListState() },
-                            firstItemFocusRequester = row3FirstItemFR,
-                            onSeeMoreClick = {
-                                onNavigateToCatalog("Action & Adventure", "movie", "top", "Action")
-                            },
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
-                        )
-                    }
-                }
-
-                // Category 4: Sci-Fi Hits
-                if (scifiMovies.isNotEmpty()) {
-                    item {
-                        MediaCatalogRow(
-                            title = "Sci-Fi & Thriller",
-                            items = scifiMovies,
-                            scrollState = rowScrollStates.getOrPut("cat_scifi_movies") { androidx.compose.foundation.lazy.LazyListState() },
-                            firstItemFocusRequester = row4FirstItemFR,
-                            onSeeMoreClick = {
-                                onNavigateToCatalog("Sci-Fi & Thriller", "movie", "top", "Sci-Fi")
-                            },
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
-                        )
-                    }
-                }
-
-                // Category 5: Comedy Series
-                if (comedySeries.isNotEmpty()) {
-                    item {
-                        MediaCatalogRow(
-                            title = "Binge-Worthy Comedies",
-                            items = comedySeries,
-                            scrollState = rowScrollStates.getOrPut("cat_comedy_series") { androidx.compose.foundation.lazy.LazyListState() },
-                            firstItemFocusRequester = row5FirstItemFR,
-                            onSeeMoreClick = {
-                                onNavigateToCatalog("Binge-Worthy Comedies", "series", "top", "Comedy")
-                            },
-                            onItemClick = { item -> onNavigateToDetail(item.type, item.id) }
-                        )
-                    }
-                }
-
-                // If nothing loaded (e.g. offline / slow connection)
-                if (topMovies.isEmpty() && topSeries.isEmpty() && continueWatchingList.isEmpty() && watchlist.isEmpty()) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(30.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Text(
-                                    text = loadError ?: "Unable to fetch catalog items",
-                                    color = TextMuted,
-                                    fontSize = 14.sp
-                                )
-
-                                val retryInteraction = remember { MutableInteractionSource() }
-                                val isRetryFocused by retryInteraction.collectIsFocusedAsState()
-
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (isRetryFocused) FocusRingOrange else PrimaryNeon.copy(alpha = 0.2f))
-                                        .border(
-                                            if (isRetryFocused) 2.5.dp else 1.dp,
-                                            if (isRetryFocused) FocusRingOrange else PrimaryNeon,
-                                            RoundedCornerShape(10.dp)
-                                        )
-                                        .focusable(interactionSource = retryInteraction)
-                                        .clickable(interactionSource = retryInteraction, indication = null) {
-                                            reloadTrigger++
-                                        }
-                                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Refresh,
-                                            contentDescription = null,
-                                            tint = if (isRetryFocused) Color.Black else PrimaryNeon,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = "Retry Loading",
-                                            color = if (isRetryFocused) Color.Black else TextPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-@Composable
-private fun MediaCatalogRow(
-    title: String,
-    items: List<StremioMetaPreview>,
-    scrollState: androidx.compose.foundation.lazy.LazyListState,
-    firstItemFocusRequester: FocusRequester,
-    onSeeMoreClick: (() -> Unit)? = null,
-    onItemClick: (StremioMetaPreview) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        contentAlignment = Alignment.Center
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             CategoryBadgeIcon(categoryName = title)
-
             Text(
                 text = title,
-                color = TextPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
+                color = textColor,
+                fontSize = 11.sp,
+                fontWeight = if (isSelected || isFocused) FontWeight.Bold else FontWeight.Medium
             )
         }
+    }
+}
 
-        val displayItems = remember(items) { items.take(15) }
-
-        LazyRow(
-            state = scrollState,
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            itemsIndexed(displayItems, key = { _, meta -> meta.id }) { index, meta ->
-                PosterCard(
-                    item = meta,
-                    modifier = if (index == 0) Modifier.focusRequester(firstItemFocusRequester) else Modifier,
-                    onClick = { onItemClick(meta) }
+@Composable
+private fun CategoryBadgeIcon(categoryName: String) {
+    val clean = categoryName.trim()
+    when {
+        clean.contains("Netflix", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFFE50914))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "N",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 10.sp,
+                    letterSpacing = 0.5.sp
                 )
             }
-
-            if (onSeeMoreClick != null && items.size >= 8) {
-                item(key = "seemore_${title}") {
-                    SeeMoreGridCard(
-                        title = title,
-                        onClick = onSeeMoreClick
-                    )
-                }
+        }
+        clean.contains("Prime", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF00A8E1))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "prime",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp
+                )
+            }
+        }
+        clean.contains("Disney", ignoreCase = true) || clean.contains("Hotstar", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF0F1035))
+                    .border(0.8.dp, Color(0xFF1E88E5), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Disney+",
+                    color = Color(0xFF90CAF9),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp
+                )
+            }
+        }
+        clean.contains("Jio", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFFE50055))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Jio",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp
+                )
+            }
+        }
+        clean.contains("Zee5", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF8224E3))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "ZEE5",
+                    color = Color.White,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 8.5.sp
+                )
+            }
+        }
+        clean.contains("Sony", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFFFF6900))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "LIV",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 9.sp
+                )
+            }
+        }
+        clean.contains("HF", ignoreCase = true) || clean.contains("HuggingFace", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFFFFB300).copy(alpha = 0.2f))
+                    .border(0.8.dp, Color(0xFFFFB300), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "⚡ HF",
+                    color = Color(0xFFFFD54F),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 8.5.sp
+                )
+            }
+        }
+        clean.equals("Top Rated", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFFF5C518))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "★ TOP",
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 8.5.sp
+                )
+            }
+        }
+        clean.contains("Hindi", ignoreCase = true) -> {
+            Text(
+                text = "🇮🇳",
+                fontSize = 12.sp
+            )
+        }
+        clean.contains("Series", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0x3300E5FF))
+                    .border(0.8.dp, Color(0xFF00E5FF), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "SERIES",
+                    color = Color(0xFF00E5FF),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 8.5.sp
+                )
+            }
+        }
+        clean.contains("Movie", ignoreCase = true) -> {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0x336C5CE7))
+                    .border(0.8.dp, Color(0xFF6C5CE7), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "MOVIE",
+                    color = Color(0xFFA29BFE),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 8.5.sp
+                )
             }
         }
     }
@@ -860,16 +1115,15 @@ private fun SeeMoreGridCard(
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
-    val borderColor = if (isFocused) FocusRingOrange else Color(0x22FFFFFF)
-    val bgColor = if (isFocused) FocusRingOrange.copy(alpha = 0.18f) else SurfaceDark
+    val borderColor = if (isFocused) FocusRing else GlassBorder
+    val bgColor = if (isFocused) SurfaceCardFocused else SurfaceCard
 
     Box(
         modifier = modifier
-            .width(140.dp)
-            .aspectRatio(2f / 3f)
-            .clip(RoundedCornerShape(14.dp))
-            .background(bgColor)
-            .border(if (isFocused) 2.5.dp else 1.dp, borderColor, RoundedCornerShape(14.dp))
+            .width(104.dp)
+            .height(154.dp)
+            .background(bgColor, RoundedCornerShape(10.dp))
+            .border(if (isFocused) 2.dp else 1.dp, borderColor, RoundedCornerShape(10.dp))
             .focusable(interactionSource = interactionSource)
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.type == KeyEventType.KeyDown) {
@@ -883,7 +1137,7 @@ private fun SeeMoreGridCard(
                 } else false
             }
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
-            .padding(8.dp),
+            .padding(12.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -892,29 +1146,30 @@ private fun SeeMoreGridCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(46.dp)
-                    .clip(CircleShape)
-                    .background(if (isFocused) FocusRingOrange.copy(alpha = 0.25f) else PrimaryNeon.copy(alpha = 0.15f)),
+                    .size(42.dp)
+                    .background(if (isFocused) FocusRing.copy(alpha = 0.2f) else SurfaceElevated, CircleShape)
+                .border(1.dp, if (isFocused) FocusRing else GlassBorder, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.GridView,
                     contentDescription = null,
-                    tint = if (isFocused) FocusRingOrange else PrimaryNeon,
-                    modifier = Modifier.size(24.dp)
+                    tint = if (isFocused) FocusRing else TextSecondary,
+                    modifier = Modifier.size(20.dp)
                 )
             }
             Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = "See All",
-                color = if (isFocused) FocusRingOrange else TextPrimary,
-                fontSize = 13.5.sp,
+                color = if (isFocused) FocusRing else TextPrimary,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "Explore full list",
+                text = "Explore all",
                 color = TextMuted,
-                fontSize = 10.5.sp
+                fontSize = 10.sp
             )
         }
     }
@@ -928,7 +1183,7 @@ private fun FirstStartupSetupDialog(
     val configureFR = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(150)
+        delay(150)
         try {
             configureFR.requestFocus()
         } catch (_: Exception) {}
@@ -1043,184 +1298,6 @@ private fun FirstStartupSetupDialog(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryBadgeIcon(categoryName: String) {
-    val clean = categoryName.trim()
-    when {
-        clean.contains("Netflix", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFFE50914))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "N",
-                    color = Color.White,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 13.sp,
-                    letterSpacing = 1.sp
-                )
-            }
-        }
-        clean.contains("Prime", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF00A8E1))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "prime",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
-                )
-            }
-        }
-        clean.contains("Disney", ignoreCase = true) || clean.contains("Hotstar", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF0F1035))
-                    .border(1.dp, Color(0xFF1E88E5), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Disney+",
-                    color = Color(0xFF90CAF9),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
-                )
-            }
-        }
-        clean.contains("Jio", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFFE50055))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Jio",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
-                )
-            }
-        }
-        clean.contains("Zee5", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF8224E3))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "ZEE5",
-                    color = Color.White,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 10.sp
-                )
-            }
-        }
-        clean.contains("Sony", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFFFF6900))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "LIV",
-                    color = Color.White,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 11.sp
-                )
-            }
-        }
-        clean.contains("HF", ignoreCase = true) || clean.contains("HuggingFace", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFFFFB300).copy(alpha = 0.2f))
-                    .border(1.dp, Color(0xFFFFB300), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "⚡ HF DIRECT",
-                    color = Color(0xFFFFD54F),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp
-                )
-            }
-        }
-        clean.equals("Top Rated", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFFF5C518))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "★ TOP",
-                    color = Color.Black,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp
-                )
-            }
-        }
-        clean.contains("Hindi", ignoreCase = true) -> {
-            Text(
-                text = "🇮🇳",
-                fontSize = 16.sp
-            )
-        }
-        clean.contains("Series", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0x3300E5FF))
-                    .border(1.dp, Color(0xFF00E5FF), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "SERIES",
-                    color = Color(0xFF00E5FF),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp
-                )
-            }
-        }
-        clean.contains("Movie", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0x336C5CE7))
-                    .border(1.dp, Color(0xFF6C5CE7), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "MOVIE",
-                    color = Color(0xFFA29BFE),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp
-                )
             }
         }
     }

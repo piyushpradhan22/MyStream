@@ -151,11 +151,6 @@ fun PlayerScreen(
     val isBuffering by playerManager.isBuffering.collectAsState()
     val isArchiveActivating by playerManager.isArchiveActivating.collectAsState()
     val archiveRetryCount by playerManager.archiveRetryCount.collectAsState()
-    val currentPosition by playerManager.currentPosition.collectAsState()
-    val duration by playerManager.duration.collectAsState()
-    val bufferedPosition by playerManager.bufferedPosition.collectAsState()
-    val bufferPercentage by playerManager.bufferPercentage.collectAsState()
-    val downloadSpeed by playerManager.downloadSpeed.collectAsState()
     val errorMessage by playerManager.errorMessage.collectAsState()
     val aspectRatio by playerManager.aspectRatio.collectAsState()
     val playbackSpeed by playerManager.playbackSpeed.collectAsState()
@@ -166,6 +161,7 @@ fun PlayerScreen(
 
     var showControls by remember { mutableStateOf(true) }
     var isControlsLocked by remember { mutableStateOf(false) }
+    var userInteractionCount by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
 
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
@@ -295,10 +291,10 @@ fun PlayerScreen(
         }
     }
 
-    // Auto-hide controls timer
-    LaunchedEffect(showControls, isPlaying, isUserSeeking) {
+    // Auto-hide controls timer: resets whenever user presses any key or interacts
+    LaunchedEffect(showControls, isPlaying, isUserSeeking, userInteractionCount) {
         if (showControls && isPlaying && !isControlsLocked && !isUserSeeking) {
-            delay(4000)
+            delay(5000)
             showControls = false
         }
     }
@@ -320,7 +316,9 @@ fun PlayerScreen(
 
     LaunchedEffect(showControls) {
         if (showControls && !isControlsLocked) {
-            playPauseFocusRequester.requestFocus()
+            try {
+                playPauseFocusRequester.requestFocus()
+            } catch (_: Exception) {}
         }
     }
 
@@ -344,8 +342,9 @@ fun PlayerScreen(
     }
 
     fun triggerDebouncedNavSeek(deltaSeconds: Long) {
-        val durationCap = if (duration > 0L) duration else Long.MAX_VALUE
-        val basePos = pendingSeekTargetMs ?: (if (isUserSeeking) sliderPosition.toLong() else currentPosition)
+        val currentDur = playerManager.duration.value
+        val durationCap = if (currentDur > 0L) currentDur else Long.MAX_VALUE
+        val basePos = pendingSeekTargetMs ?: (if (isUserSeeking) sliderPosition.toLong() else playerManager.currentPosition.value)
         val deltaMs = deltaSeconds * 1000L
         val newTarget = (basePos + deltaMs).coerceIn(0L, durationCap)
         accumulatedSeekDeltaMs += deltaMs
@@ -562,7 +561,7 @@ fun PlayerScreen(
             Key.Enter,
             Key.NumPadEnter -> {
                 playerManager.pause()
-                com.mystream.app.ui.utils.ExternalPlayerHelper.launchExternalPlayer(context, item, currentPosition)
+                com.mystream.app.ui.utils.ExternalPlayerHelper.launchExternalPlayer(context, item, playerManager.currentPosition.value)
                 true
             }
             else -> false
@@ -648,6 +647,7 @@ fun PlayerScreen(
                 }
 
                 showControls = true
+                userInteractionCount++
 
                 // Let dialogs own DPAD navigation when open.
                 if (showAudioDialog || showSubtitleDialog || showAspectDialog || showSpeedDialog) {
@@ -781,6 +781,9 @@ fun PlayerScreen(
             enter = fadeIn(),
             exit = fadeOut()
         ) {
+            val downloadSpeed by playerManager.downloadSpeed.collectAsState()
+            val bufferPercentage by playerManager.bufferPercentage.collectAsState()
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -833,22 +836,20 @@ fun PlayerScreen(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.padding(32.dp)
                 ) {
                     Text(
                         text = "Playback Error",
-                        color = Color(0xFFFF4757),
-                        fontSize = 20.sp,
+                        color = Color(0xFFFF5252),
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold
                     )
-
-                    Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
                         text = err,
                         color = TextSecondary,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
 
@@ -863,7 +864,7 @@ fun PlayerScreen(
 
                         androidx.compose.material3.Button(
                             onClick = {
-                                playerManager.playMedia(item, currentPosition)
+                                playerManager.playMedia(item, playerManager.currentPosition.value)
                             },
                             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                                 containerColor = if (isRetryBtnFocused) FocusRingOrange else PrimaryNeon
@@ -880,7 +881,7 @@ fun PlayerScreen(
 
                         androidx.compose.material3.Button(
                             onClick = {
-                                com.mystream.app.ui.utils.ExternalPlayerHelper.launchExternalPlayer(context, item, currentPosition)
+                                com.mystream.app.ui.utils.ExternalPlayerHelper.launchExternalPlayer(context, item, playerManager.currentPosition.value)
                             },
                             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                                 containerColor = if (isExtBtnFocused) FocusRingOrange else SecondaryCyan
@@ -944,6 +945,10 @@ fun PlayerScreen(
             enter = fadeIn(),
             exit = fadeOut()
         ) {
+            val currentPosition by playerManager.currentPosition.collectAsState()
+            val duration by playerManager.duration.collectAsState()
+            val downloadSpeed by playerManager.downloadSpeed.collectAsState()
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()

@@ -84,9 +84,12 @@ import com.mystream.app.data.updater.AppUpdateManager
 import com.mystream.app.ui.components.AppUpdateDialog
 import com.mystream.app.ui.theme.AccentRed
 import com.mystream.app.ui.theme.BgDark
+import com.mystream.app.ui.theme.FocusRing
 import com.mystream.app.ui.theme.FocusRingOrange
+import com.mystream.app.ui.theme.GlassBorder
 import com.mystream.app.ui.theme.PrimaryNeon
 import com.mystream.app.ui.theme.SurfaceCard
+import com.mystream.app.ui.theme.SurfaceCardFocused
 import com.mystream.app.ui.theme.SurfaceDark
 import com.mystream.app.ui.theme.TextMuted
 import com.mystream.app.ui.theme.TextPrimary
@@ -167,7 +170,7 @@ fun SettingsScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BgDark)
+            .background(com.mystream.app.ui.theme.HotstarBg)
     ) {
         LazyColumn(
             state = listState,
@@ -190,18 +193,18 @@ fun SettingsScreen(
                         interactionSource = backInteraction,
                         modifier = Modifier
                             .focusRequester(backButtonFocusRequester)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isBackFocused) FocusRingOrange.copy(alpha = 0.25f) else Color.Transparent)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isBackFocused) FocusRing else SurfaceCard)
                             .border(
-                                if (isBackFocused) 2.dp else 0.dp,
-                                if (isBackFocused) FocusRingOrange else Color.Transparent,
-                                RoundedCornerShape(8.dp)
+                                if (isBackFocused) 2.dp else 1.dp,
+                                if (isBackFocused) FocusRing else GlassBorder,
+                                RoundedCornerShape(12.dp)
                             )
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = if (isBackFocused) FocusRingOrange else TextPrimary
+                            tint = if (isBackFocused) Color.Black else TextPrimary
                         )
                     }
                     Spacer(modifier = Modifier.width(6.dp))
@@ -235,8 +238,8 @@ fun SettingsScreen(
 
                 Card(
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                    border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+                    border = BorderStroke(1.dp, GlassBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -413,8 +416,8 @@ fun SettingsScreen(
 
                 Card(
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                    border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+                    border = BorderStroke(1.dp, GlassBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -579,8 +582,8 @@ fun SettingsScreen(
 
                 Card(
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                    border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+                    border = BorderStroke(1.dp, GlassBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -667,9 +670,9 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                    border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+                    border = BorderStroke(1.dp, GlassBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -826,10 +829,10 @@ private fun TVInputField(
             .fillMaxWidth()
             .focusRequester(focusRequester)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (isFocused) Color(0xFF141822) else Color(0xFF07090E))
+            .background(if (isFocused) SurfaceCardFocused else SurfaceCard)
             .border(
-                width = if (isFocused) 2.5.dp else 1.dp,
-                color = if (isFocused) FocusRingOrange else Color(0x33FFFFFF),
+                width = if (isFocused) 2.dp else 1.dp,
+                color = if (isFocused) FocusRing else GlassBorder,
                 shape = RoundedCornerShape(10.dp)
             )
             .focusable(interactionSource = interactionSource)
@@ -968,10 +971,10 @@ private fun TVTextEditDialog(
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = FocusRingOrange,
-                            unfocusedBorderColor = Color(0x44FFFFFF),
-                            focusedContainerColor = Color(0xFF07090E),
-                            unfocusedContainerColor = Color(0xFF07090E)
+                            focusedBorderColor = FocusRing,
+                            unfocusedBorderColor = GlassBorder,
+                            focusedContainerColor = SurfaceCardFocused,
+                            unfocusedContainerColor = SurfaceCardFocused
                         ),
                         keyboardOptions = KeyboardOptions(
                             imeAction = if (singleLine) ImeAction.Done else ImeAction.Default

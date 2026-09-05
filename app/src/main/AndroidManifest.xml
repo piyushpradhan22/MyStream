@@ -53,6 +53,8 @@
         android:hardwareAccelerated="true"
         tools:targetApi="35">
 
+        <profileable android:shell="true" />
+
         <activity
             android:name=".MainActivity"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboard|keyboardHidden"

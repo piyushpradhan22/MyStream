@@ -25,6 +25,7 @@ import com.mystream.app.ui.utils.appTopBarPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -68,8 +69,10 @@ import com.mystream.app.data.model.StremioMetaPreview
 import com.mystream.app.data.repository.SourcesRepository
 import com.mystream.app.ui.components.PosterCard
 import com.mystream.app.ui.theme.BgDark
-import com.mystream.app.ui.theme.FocusRingOrange
+import com.mystream.app.ui.theme.FocusRing
+import com.mystream.app.ui.theme.GlassBorder
 import com.mystream.app.ui.theme.PrimaryNeon
+import com.mystream.app.ui.theme.SurfaceCard
 import com.mystream.app.ui.theme.SurfaceDark
 import com.mystream.app.ui.theme.TextMuted
 import com.mystream.app.ui.theme.TextPrimary
@@ -233,13 +236,13 @@ fun SearchScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BgDark)
+            .background(com.mystream.app.ui.theme.HotstarBg)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .appTopBarPadding(additionalTop = 10.dp)
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 24.dp)
                 .padding(bottom = 12.dp)
         ) {
             // Search Top Bar
@@ -256,12 +259,13 @@ fun SearchScreen(
                     interactionSource = backInteraction,
                     modifier = Modifier
                         .focusRequester(backFocusRequester)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isBackFocused) FocusRingOrange.copy(alpha = 0.25f) else Color.Transparent)
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(if (isBackFocused) FocusRing else SurfaceCard)
                         .border(
-                            if (isBackFocused) 2.dp else 0.dp,
-                            if (isBackFocused) FocusRingOrange else Color.Transparent,
-                            RoundedCornerShape(8.dp)
+                            if (isBackFocused) 2.dp else 1.dp,
+                            if (isBackFocused) FocusRing else GlassBorder,
+                            CircleShape
                         )
                         .onPreviewKeyEvent { keyEvent ->
                             if (keyEvent.type == KeyEventType.KeyDown) {
@@ -282,7 +286,8 @@ fun SearchScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        tint = if (isBackFocused) FocusRingOrange else TextPrimary
+                        tint = if (isBackFocused) Color.Black else TextPrimary,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
 
@@ -301,12 +306,12 @@ fun SearchScreen(
                         query = it
                         performSearch(it)
                     },
-                    placeholder = { Text("Search", color = TextMuted) },
+                    placeholder = { Text("Search movies, shows...", color = TextMuted) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = null,
-                            tint = if (isSearchFocused || query.isNotEmpty()) FocusRingOrange else TextSecondary
+                            tint = if (isSearchFocused || query.isNotEmpty()) FocusRing else TextSecondary
                         )
                     },
                     trailingIcon = {
@@ -325,7 +330,7 @@ fun SearchScreen(
                         }
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(8.dp),
                     interactionSource = searchInteractionSource,
                     keyboardOptions = KeyboardOptions(
                         imeAction = ImeAction.Search,
@@ -344,12 +349,12 @@ fun SearchScreen(
                         }
                     ),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = SurfaceDark,
-                        unfocusedContainerColor = SurfaceDark,
+                        focusedContainerColor = SurfaceCard,
+                        unfocusedContainerColor = SurfaceCard,
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = FocusRingOrange,
-                        unfocusedBorderColor = Color(0x33FFFFFF)
+                        focusedBorderColor = FocusRing,
+                        unfocusedBorderColor = GlassBorder
                     ),
                     modifier = Modifier
                         .weight(1f)
@@ -391,13 +396,13 @@ fun SearchScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Filter Chips (All, Movies, Series)
+            // Filter Chips (All, Movies, Series) - Styled similar to HomeScreen Category Pills
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 4.dp)
+                modifier = Modifier.padding(horizontal = 2.dp)
             ) {
                 listOf("All", "Movies", "Series").forEachIndexed { idx, filter ->
                     val isSelected = selectedFilter == filter
@@ -407,18 +412,18 @@ fun SearchScreen(
                     Box(
                         modifier = Modifier
                             .then(if (idx == 0) Modifier.focusRequester(chipAllFocusRequester) else Modifier)
-                            .clip(RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(
-                                if (isChipFocused) FocusRingOrange.copy(alpha = 0.25f)
-                                else if (isSelected) PrimaryNeon.copy(alpha = 0.25f)
-                                else SurfaceDark
+                                if (isChipFocused) FocusRing.copy(alpha = 0.25f)
+                                else if (isSelected) com.mystream.app.ui.theme.HotstarPillActiveBg
+                                else com.mystream.app.ui.theme.HotstarPillInactiveBg
                             )
                             .border(
-                                width = if (isChipFocused) 2.5.dp else 1.dp,
-                                color = if (isChipFocused) FocusRingOrange
-                                else if (isSelected) PrimaryNeon
-                                else Color(0x22FFFFFF),
-                                shape = RoundedCornerShape(20.dp)
+                                width = if (isChipFocused) 1.5.dp else 1.dp,
+                                color = if (isChipFocused) FocusRing
+                                else if (isSelected) com.mystream.app.ui.theme.HotstarPillActive
+                                else GlassBorder,
+                                shape = RoundedCornerShape(6.dp)
                             )
                             .focusable(interactionSource = chipInteraction)
                             .onPreviewKeyEvent { keyEvent ->
@@ -445,13 +450,13 @@ fun SearchScreen(
                             .clickable(interactionSource = chipInteraction, indication = null) {
                                 selectedFilter = filter
                             }
-                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                            .padding(horizontal = 12.dp, vertical = 5.dp)
                     ) {
                         Text(
                             text = filter,
-                            color = if (isChipFocused) FocusRingOrange else if (isSelected) TextPrimary else TextSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected || isChipFocused) FontWeight.Bold else FontWeight.Normal
+                            color = if (isChipFocused) FocusRing else if (isSelected) TextPrimary else com.mystream.app.ui.theme.HotstarPillInactiveText,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected || isChipFocused) FontWeight.Bold else FontWeight.Medium
                         )
                     }
                 }
@@ -513,8 +518,8 @@ fun SearchScreen(
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 105.dp),
-                    contentPadding = PaddingValues(bottom = 30.dp),
+                    columns = GridCells.Adaptive(minSize = 110.dp),
+                    contentPadding = PaddingValues(bottom = 50.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize()
@@ -522,17 +527,17 @@ fun SearchScreen(
                     itemsIndexed(displayedResults, key = { _, item -> item.id }) { index, item ->
                         PosterCard(
                             item = item,
+                            width = 110,
                             modifier = Modifier
                                 .then(if (index == 0) Modifier.focusRequester(firstResultFocusRequester) else Modifier)
                                 .onPreviewKeyEvent { keyEvent ->
                                     if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionUp) {
-                                        if (index < 4) {
+                                        if (index < 6) {
                                             chipAllFocusRequester.safeRequestFocus()
                                             true
                                         } else false
                                     } else false
                                 },
-                            width = 110,
                             onClick = { onNavigateToDetail(item.type, item.id) }
                         )
                     }

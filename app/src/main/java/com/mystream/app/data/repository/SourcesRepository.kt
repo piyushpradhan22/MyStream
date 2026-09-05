@@ -414,14 +414,56 @@ class SourcesRepository(
         emptyMap()
     }
 
-    suspend fun getAllIndianCategories(): List<Pair<String, List<StremioMetaPreview>>> = withContext(Dispatchers.IO) {
-        val data = loadIndianCatalogData()
-        data.mapNotNull { (category, items) ->
+    private var cachedIndianPreviews: List<Pair<String, List<StremioMetaPreview>>>? = null
+    private val indianCatalogHomeCacheFile by lazy { java.io.File(context.filesDir, "imdb_indian_home.json") }
+
+    suspend fun getAllIndianCategories(forceRefresh: Boolean = false): List<Pair<String, List<StremioMetaPreview>>> = withContext(Dispatchers.IO) {
+        if (!forceRefresh) {
+            cachedIndianPreviews?.let { return@withContext it }
+        }
+
+        // 1. Instant Fast Path: load from pre-extracted home cache (~100KB) if fresh (< 1 week)
+        if (!forceRefresh && indianCatalogHomeCacheFile.exists() && indianCatalogHomeCacheFile.length() > 500) {
+            val cacheAge = System.currentTimeMillis() - indianCatalogHomeCacheFile.lastModified()
+            if (cacheAge < ONE_WEEK_MS) {
+                try {
+                    val text = indianCatalogHomeCacheFile.readText()
+                    if (text.isNotBlank()) {
+                        val parsed = json.decodeFromString<List<Pair<String, List<StremioMetaPreview>>>>(text)
+                        if (parsed.isNotEmpty()) {
+                            cachedIndianPreviews = parsed
+                            return@withContext parsed
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("SourcesRepository", "Failed to parse fast home Indian catalog cache", e)
+                }
+            }
+        }
+
+        // 2. Slow Path: parse full data, extract top 20 items per category, and save to fast home cache
+        val data = loadIndianCatalogData(forceRefresh)
+        val result = data.mapNotNull { (category, items) ->
             if (items.isNotEmpty()) {
                 val previews = items.take(20).map { it.toStremioMetaPreview() }
                 category to previews
             } else null
         }
+        cachedIndianPreviews = result
+
+        if (result.isNotEmpty()) {
+            try {
+                val serialized = json.encodeToString(result)
+                indianCatalogHomeCacheFile.writeText(serialized)
+            } catch (e: Exception) {
+                android.util.Log.w("SourcesRepository", "Failed to save fast home Indian catalog cache", e)
+            }
+        }
+
+        // Release full 11MB in-memory catalog from RAM immediately to relieve TV GC
+        cachedIndianCatalog = null
+
+        result
     }
 
     suspend fun fetchIndianCatalog(
@@ -442,6 +484,8 @@ class SourcesRepository(
         val data = loadIndianCatalogData()
         data.values.flatten()
             .filter { item ->
+                val resolvedName = if (item.id == "tt1187043" || item.name.equals("Idiots", ignoreCase = true)) "3 idiots" else item.name.lowercase()
+                resolvedName.contains(q) ||
                 item.name.lowercase().contains(q) ||
                 item.description?.lowercase()?.contains(q) == true
             }
@@ -607,10 +651,15 @@ class SourcesRepository(
         }
     }
 
+    private val memoryTorrentsCache = mutableMapOf<String, List<StremioStreamSource>>()
+
     fun clearStreamsCache(type: String, imdbId: String) {
         val cacheKey = "$type:$imdbId"
         synchronized(memoryStreamsCache) {
             memoryStreamsCache.remove(cacheKey)
+        }
+        synchronized(memoryTorrentsCache) {
+            memoryTorrentsCache.remove(cacheKey)
         }
         try {
             val current = loadDiskStreamCache()
@@ -812,8 +861,19 @@ class SourcesRepository(
         return pikpakResolver.resolveDirectStreamUrlOnDemand(stream, imdbId)
     }
 
-    suspend fun fetchAllTorrentsForMedia(type: String, id: String): List<StremioStreamSource> {
-        return pikpakResolver.fetchAllTorrentioTorrents(type, id)
+    suspend fun fetchAllTorrentsForMedia(type: String, id: String, forceRefresh: Boolean = false): List<StremioStreamSource> {
+        val cacheKey = "$type:$id"
+        if (!forceRefresh) {
+            val cached = synchronized(memoryTorrentsCache) { memoryTorrentsCache[cacheKey] }
+            if (!cached.isNullOrEmpty()) return cached
+        }
+        val fetched = pikpakResolver.fetchAllTorrentioTorrents(type, id)
+        if (fetched.isNotEmpty()) {
+            synchronized(memoryTorrentsCache) {
+                memoryTorrentsCache[cacheKey] = fetched
+            }
+        }
+        return fetched
     }
 
     suspend fun resolveAndSaveSingleTorrent(
@@ -871,7 +931,7 @@ class SourcesRepository(
 
             for (vid in matches) {
                 // Ensure this video is not a Short
-                if (!html.contains("""/shorts/$vid""") && !html.contains(""""reelItemRenderer"""") && !html.contains(""""shortsLockupViewModel"""")) {
+                if (!html.contains("""/shorts/$vid""")) {
                     youtubeTrailerCache[cacheKey] = vid
                     return@withContext vid
                 }

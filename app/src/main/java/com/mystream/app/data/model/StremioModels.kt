@@ -30,11 +30,13 @@ data class StremioCatalogDesc(
 
 // --- Catalog & Search Responses ---
 @Serializable
+@androidx.compose.runtime.Immutable
 data class StremioCatalogResponse(
     val metas: List<StremioMetaPreview> = emptyList()
 )
 
 @Serializable
+@androidx.compose.runtime.Immutable
 data class StremioMetaPreview(
     val id: String,
     val name: String,
@@ -66,10 +68,11 @@ data class ImdbIndianItem(
         val ratingBadge = imdbRating?.takeIf { it != "0" && it.isNotBlank() }?.let { "★ $it" }
         val genresList = listOfNotNull(ratingBadge, releaseInfo?.takeIf { it.isNotBlank() })
         val cleanType = if (type.contains("series", ignoreCase = true)) "series" else "movie"
+        val correctedName = if (id == "tt1187043" || name.equals("Idiots", ignoreCase = true)) "3 Idiots" else name
         return StremioMetaPreview(
             id = id,
             type = cleanType,
-            name = name,
+            name = correctedName,
             poster = poster ?: "https://images.metahub.space/poster/medium/$id/img",
             background = "https://images.metahub.space/background/medium/$id/img",
             description = description?.takeIf { it.isNotBlank() },
@@ -333,7 +336,9 @@ data class AppSettingsConfig(
     val linkCacheTtlHours: Int = 6, // default: 6 hours (0 = never expire / permanent)
     val autoPlayBestStream: Boolean = false,
     val debridApiKey: String? = null,
-    val customServerUrl: String? = null
+    val customServerUrl: String? = null,
+    val trailerPlaybackEnabled: Boolean = true, // default: ON
+    val trailerAudioMuted: Boolean = false // default: false (audio ON per user preference)
 )
 
 @Serializable

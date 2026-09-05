@@ -33,12 +33,26 @@ class MyStreamApplication : Application(), SingletonImageLoader.Factory {
     private var imageLoaderInstance: ImageLoader? = null
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
+        val isTv = com.mystream.app.ui.utils.DeviceUtils.isTvDevice(context)
+        val isLowRam = com.mystream.app.ui.utils.DeviceUtils.isLowRamDevice(context)
+        val cachePercent = if (isTv || isLowRam) 0.08 else 0.15
+        val diskCacheBytes = if (isTv || isLowRam) 50L * 1024 * 1024 else 80L * 1024 * 1024
+
         val okHttpClient = OkHttpClient.Builder()
             .dns(SystemFallbackDns)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
+            .dispatcher(okhttp3.Dispatcher().apply {
+                if (isTv || isLowRam) {
+                    maxRequests = 4
+                    maxRequestsPerHost = 4
+                } else {
+                    maxRequests = 16
+                    maxRequestsPerHost = 8
+                }
+            })
             .build()
 
         val loader = ImageLoader.Builder(context)
@@ -47,16 +61,16 @@ class MyStreamApplication : Application(), SingletonImageLoader.Factory {
             }
             .memoryCache {
                 MemoryCache.Builder()
-                    .maxSizePercent(context, 0.15)
+                    .maxSizePercent(context, cachePercent)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("image_cache").toOkioPath())
-                    .maxSizeBytes(80L * 1024 * 1024) // 80MB disk cache
+                    .maxSizeBytes(diskCacheBytes)
                     .build()
             }
-            .crossfade(true)
+            .crossfade(!isTv) // Disable heavy alpha-crossfade on TV to eliminate 2-bitmap memory overlap
             .build()
 
         imageLoaderInstance = loader
@@ -65,10 +79,11 @@ class MyStreamApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= TRIM_MEMORY_BACKGROUND) {
+        if (level >= TRIM_MEMORY_BACKGROUND || level >= TRIM_MEMORY_COMPLETE) {
             imageLoaderInstance?.memoryCache?.clear()
-        } else if (level >= TRIM_MEMORY_UI_HIDDEN) {
-            imageLoaderInstance?.memoryCache?.trimToSize((imageLoaderInstance?.memoryCache?.maxSize ?: 0) / 2)
+        } else if (level >= TRIM_MEMORY_UI_HIDDEN || level >= TRIM_MEMORY_MODERATE) {
+            val currentMax = imageLoaderInstance?.memoryCache?.maxSize ?: 0
+            imageLoaderInstance?.memoryCache?.trimToSize(currentMax / 2)
         }
     }
 
