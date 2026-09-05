@@ -143,12 +143,14 @@ fun BackgroundTrailerPlayer(
             var el = document.getElementById('player');
             if (el) {
                 el.style.position = 'absolute';
-                el.style.top = '-8%';
+                el.style.top = '0';
                 el.style.left = '0';
                 el.style.right = '0';
+                el.style.bottom = '0';
                 el.style.width = '100%';
-                el.style.height = '110%';
-                el.style.transform = 'none';
+                el.style.height = '100%';
+                el.style.transform = 'scale(1.3)';
+                el.style.transformOrigin = 'center center';
             }
             """.trimIndent()
         } else {
@@ -159,9 +161,11 @@ fun BackgroundTrailerPlayer(
                 el.style.top = '0';
                 el.style.left = '0';
                 el.style.right = '0';
+                el.style.bottom = '0';
                 el.style.width = '100%';
                 el.style.height = '100%';
                 el.style.transform = 'none';
+                el.style.transformOrigin = 'center center';
             }
             """.trimIndent()
         }
@@ -230,13 +234,16 @@ fun BackgroundTrailerPlayer(
                         """
                         #player {
                             position: absolute;
-                            top: -8%;
+                            top: 0;
                             left: 0;
                             right: 0;
+                            bottom: 0;
                             width: 100%;
-                            height: 110%;
+                            height: 100%;
+                            transform: scale(1.3);
+                            transform-origin: center center;
                             border: none;
-                            transition: all 0.4s ease-in-out;
+                            transition: transform 0.4s ease-in-out;
                         }
                         """.trimIndent()
                     } else {
@@ -246,10 +253,13 @@ fun BackgroundTrailerPlayer(
                             top: 0;
                             left: 0;
                             right: 0;
+                            bottom: 0;
                             width: 100%;
                             height: 100%;
+                            transform: none;
+                            transform-origin: center center;
                             border: none;
-                            transition: all 0.4s ease-in-out;
+                            transition: transform 0.4s ease-in-out;
                         }
                         """.trimIndent()
                     }
