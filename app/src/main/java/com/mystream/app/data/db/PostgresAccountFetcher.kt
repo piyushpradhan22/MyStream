@@ -556,9 +556,9 @@ object PostgresAccountFetcher {
                 FROM (
                     SELECT DISTINCT ON (SPLIT_PART(imdb_id, ':', 1)) imdb_id, name, url, size, file_name, hash, time
                     FROM hftor
-                    ORDER BY SPLIT_PART(imdb_id, ':', 1), time DESC
+                    ORDER BY SPLIT_PART(imdb_id, ':', 1), time DESC, imdb_id ASC
                 ) sub
-                ORDER BY time DESC
+                ORDER BY time DESC, imdb_id ASC
                 LIMIT $limit OFFSET $offset
             """.trimIndent()
             val rows = executePgQuery(config, query)

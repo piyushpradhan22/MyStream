@@ -53,16 +53,19 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.flow.distinctUntilChanged
 import com.mystream.app.ui.utils.safeRequestFocus
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -513,6 +516,117 @@ fun HomeScreen(
         }
     }
 
+    val endOfCatalogReached = remember { mutableStateMapOf<String, Boolean>() }
+
+    // Resilient infinite scroll pagination using snapshotFlow (prevents D-pad scroll cancellation)
+    LaunchedEffect(selectedCategoryId) {
+        snapshotFlow {
+            val cat = categories.find { it.id == selectedCategoryId }
+            val items = currentCategoryItems
+            val threshold = (items.size - 6).coerceAtLeast(0)
+            val nearEnd = items.size >= 10 && (
+                focusedCardIndex >= threshold || 
+                carouselListState.firstVisibleItemIndex >= (threshold - 2).coerceAtLeast(0)
+            )
+            Triple(nearEnd, cat, items.size)
+        }
+        .distinctUntilChanged()
+        .collect { (nearEnd, cat, currentSize) ->
+            if (nearEnd && cat != null && 
+                cat.id != "continue_watching" && cat.id != "watchlist" && 
+                !isLoadingMoreCategoryItems && 
+                endOfCatalogReached[cat.id] != true
+            ) {
+                isLoadingMoreCategoryItems = true
+                try {
+                    val nextSkip = currentSize
+                    android.util.Log.d("HomeScreen", "Pagination triggering for ${cat.id} at skip=$nextSkip, currentCount=$currentSize")
+                    if (cat.id.startsWith("indian_")) {
+                        val idx = cat.id.substringAfter("indian_").toIntOrNull() ?: 0
+                        val catTitle = indianCategories.getOrNull(idx)?.first
+                        if (catTitle != null) {
+                            val res = repository.fetchIndianCatalog(category = catTitle, skip = nextSkip, limit = 20)
+                            if (res.metas.isNotEmpty()) {
+                                val updated = indianCategories.toMutableList()
+                                val (cName, existing) = updated[idx]
+                                val newItems = (existing + res.metas).distinctBy { it.id }
+                                if (newItems.size == existing.size) {
+                                    endOfCatalogReached[cat.id] = true
+                                } else {
+                                    updated[idx] = cName to newItems
+                                    indianCategories = updated
+                                }
+                            } else {
+                                endOfCatalogReached[cat.id] = true
+                            }
+                        }
+                    } else if (cat.id == "hf_direct") {
+                        val res = repository.fetchHfCatalog(skip = nextSkip, limit = 30)
+                        if (res.metas.isNotEmpty()) {
+                            val beforeSize = hfCatalogItems.size
+                            val newItems = (hfCatalogItems + res.metas).distinctBy { it.id }
+                            if (newItems.size == beforeSize) {
+                                endOfCatalogReached[cat.id] = true
+                            } else {
+                                hfCatalogItems = newItems
+                            }
+                        } else {
+                            endOfCatalogReached[cat.id] = true
+                        }
+                    } else {
+                        val res = repository.fetchCatalog(
+                            type = cat.type,
+                            catalogId = cat.catalogId,
+                            genre = cat.genre,
+                            skip = nextSkip
+                        )
+                        if (res.metas.isNotEmpty()) {
+                            when (selectedCategoryId) {
+                                "trending" -> {
+                                    val beforeSize = topMovies.size
+                                    val newItems = (topMovies + res.metas).distinctBy { it.id }
+                                    if (newItems.size == beforeSize) endOfCatalogReached[cat.id] = true
+                                    else topMovies = newItems
+                                }
+                                "series" -> {
+                                    val beforeSize = topSeries.size
+                                    val newItems = (topSeries + res.metas).distinctBy { it.id }
+                                    if (newItems.size == beforeSize) endOfCatalogReached[cat.id] = true
+                                    else topSeries = newItems
+                                }
+                                "action" -> {
+                                    val beforeSize = actionMovies.size
+                                    val newItems = (actionMovies + res.metas).distinctBy { it.id }
+                                    if (newItems.size == beforeSize) endOfCatalogReached[cat.id] = true
+                                    else actionMovies = newItems
+                                }
+                                "scifi" -> {
+                                    val beforeSize = scifiMovies.size
+                                    val newItems = (scifiMovies + res.metas).distinctBy { it.id }
+                                    if (newItems.size == beforeSize) endOfCatalogReached[cat.id] = true
+                                    else scifiMovies = newItems
+                                }
+                                "comedy" -> {
+                                    val beforeSize = comedySeries.size
+                                    val newItems = (comedySeries + res.metas).distinctBy { it.id }
+                                    if (newItems.size == beforeSize) endOfCatalogReached[cat.id] = true
+                                    else comedySeries = newItems
+                                }
+                            }
+                        } else {
+                            endOfCatalogReached[cat.id] = true
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    android.util.Log.e("HomeScreen", "Pagination error for $selectedCategoryId", e)
+                } finally {
+                    isLoadingMoreCategoryItems = false
+                }
+            }
+        }
+    }
+
     // Main JioHotstar OTT Layout: Left Sidebar + Main Content (Spotlight + Middle Carousel + Very Bottom Category Pills)
     Row(
         modifier = Modifier
@@ -657,64 +771,6 @@ fun HomeScreen(
                             )
                         }
                     } else {
-                        val activeCategory = categories.find { it.id == selectedCategoryId }
-
-                        // Infinite scroll pagination when user nears end of category row
-                        LaunchedEffect(carouselListState.firstVisibleItemIndex, focusedCardIndex, currentCategoryItems.size, selectedCategoryId) {
-                            if (isLoadingMoreCategoryItems) return@LaunchedEffect
-                            val cat = activeCategory ?: return@LaunchedEffect
-                            if (cat.id == "continue_watching" || cat.id == "watchlist") return@LaunchedEffect
-
-                            val threshold = (currentCategoryItems.size - 5).coerceAtLeast(0)
-                            val shouldLoad = currentCategoryItems.size >= 10 &&
-                                    (focusedCardIndex >= threshold || carouselListState.firstVisibleItemIndex >= (threshold - 1).coerceAtLeast(0))
-
-                            if (shouldLoad) {
-                                isLoadingMoreCategoryItems = true
-                                try {
-                                    val nextSkip = currentCategoryItems.size
-                                    if (cat.id.startsWith("indian_")) {
-                                        val idx = cat.id.substringAfter("indian_").toIntOrNull() ?: 0
-                                        val catTitle = indianCategories.getOrNull(idx)?.first
-                                        if (catTitle != null) {
-                                            val res = repository.fetchIndianCatalog(category = catTitle, skip = nextSkip, limit = 20)
-                                            if (res.metas.isNotEmpty()) {
-                                                val updated = indianCategories.toMutableList()
-                                                val (cName, existing) = updated[idx]
-                                                updated[idx] = cName to (existing + res.metas).distinctBy { it.id }
-                                                indianCategories = updated
-                                            }
-                                        }
-                                    } else if (cat.id == "hf_direct") {
-                                        val res = repository.fetchHfCatalog(skip = nextSkip, limit = 30)
-                                        if (res.metas.isNotEmpty()) {
-                                            hfCatalogItems = (hfCatalogItems + res.metas).distinctBy { it.id }
-                                        }
-                                    } else {
-                                        val res = repository.fetchCatalog(
-                                            type = cat.type,
-                                            catalogId = cat.catalogId,
-                                            genre = cat.genre,
-                                            skip = nextSkip
-                                        )
-                                        if (res.metas.isNotEmpty()) {
-                                            when (selectedCategoryId) {
-                                                "trending" -> topMovies = (topMovies + res.metas).distinctBy { it.id }
-                                                "series" -> topSeries = (topSeries + res.metas).distinctBy { it.id }
-                                                "action" -> actionMovies = (actionMovies + res.metas).distinctBy { it.id }
-                                                "scifi" -> scifiMovies = (scifiMovies + res.metas).distinctBy { it.id }
-                                                "comedy" -> comedySeries = (comedySeries + res.metas).distinctBy { it.id }
-                                            }
-                                        }
-                                    }
-                                } catch (e: Exception) {
-                                    android.util.Log.e("HomeScreen", "Pagination error for $selectedCategoryId", e)
-                                } finally {
-                                    isLoadingMoreCategoryItems = false
-                                }
-                            }
-                        }
-
                         LazyRow(
                             state = carouselListState,
                             modifier = Modifier
@@ -789,6 +845,23 @@ fun HomeScreen(
                                         onNavigateToDetail(meta.type, meta.id)
                                     }
                                 )
+                            }
+
+                            if (isLoadingMoreCategoryItems) {
+                                item(key = "${selectedCategoryId}_loading_more") {
+                                    Box(
+                                        modifier = Modifier
+                                            .height(160.dp)
+                                            .width(70.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            color = FocusRing,
+                                            modifier = Modifier.size(24.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
