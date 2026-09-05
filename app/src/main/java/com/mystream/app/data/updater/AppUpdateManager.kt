@@ -2,8 +2,10 @@ package com.mystream.app.data.updater
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.mystream.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -338,10 +340,42 @@ class AppUpdateManager(private val context: Context) {
         }
     }
 
+    fun canInstallApk(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.packageManager.canRequestPackageInstalls()
+        } else {
+            true
+        }
+    }
+
+    fun openInstallPermissionSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            } catch (_: Exception) {
+                try {
+                    val secIntent = Intent(Settings.ACTION_SECURITY_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(secIntent)
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     fun installApk(apkFile: File): Result<Unit> {
         return try {
             if (!apkFile.exists()) {
                 return Result.failure(Exception("APK file not found: ${apkFile.absolutePath}"))
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
+                openInstallPermissionSettings()
+                return Result.failure(Exception("Permission required: Please toggle 'Allow from this source' for MyStream in the Settings screen, then tap Update again."))
             }
 
             val authority = "${context.packageName}.fileprovider"
@@ -350,7 +384,16 @@ class AppUpdateManager(private val context: Context) {
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(fileUri, "application/vnd.android.package-archive")
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
             }
+
+            val resolveLists = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            for (res in resolveLists) {
+                try {
+                    context.grantUriPermission(res.activityInfo.packageName, fileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (_: Exception) {}
+            }
+
             context.startActivity(intent)
             Result.success(Unit)
         } catch (e: Exception) {
