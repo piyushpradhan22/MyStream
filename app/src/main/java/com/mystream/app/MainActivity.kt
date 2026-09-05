@@ -101,6 +101,17 @@ class MainActivity : ComponentActivity() {
             }
         }
         disableComposeAccessibilityIfTalkBackDisabled()
+
+        // Startup storage hygiene: purge lingering torrents, obsolete APKs, and check low storage
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                com.mystream.app.torrent.TorrentStreamEngine.getInstance(applicationContext).purgeTorrentCache()
+                java.io.File(cacheDir, "updates").listFiles()?.forEach { it.delete() }
+                com.mystream.app.player.MediaCacheManager.checkAndTrimIfLowStorage(applicationContext)
+            } catch (e: Exception) {
+                Log.w(TAG, "Startup storage hygiene error: ${e.message}")
+            }
+        }
     }
 
     @Composable

@@ -456,15 +456,42 @@ class TorrentStreamEngine private constructor(private val context: Context) {
         }
     }
 
+    fun purgeTorrentCache() {
+        try {
+            val dir = torrentStorageDir
+            if (dir.exists()) {
+                dir.listFiles()?.forEach { file ->
+                    try { file.deleteRecursively() } catch (_: Exception) {}
+                }
+                Log.i(TAG, "Purged torrent stream cache files from disk")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error purging torrent cache: ${e.message}")
+        }
+    }
+
     fun stopStreaming() {
         monitorJob?.cancel()
         monitorJob = null
         currentHandle?.let { handle ->
-            try { if (handle.isValid) sessionManager.remove(handle) } catch (_: Exception) {}
+            try {
+                if (handle.isValid) {
+                    try {
+                        sessionManager.remove(handle, org.libtorrent4j.SessionHandle.DELETE_FILES)
+                    } catch (_: Exception) {
+                        sessionManager.remove(handle)
+                    }
+                }
+            } catch (_: Exception) {}
         }
         currentHandle = null
         httpServer?.setActiveFile(null, null, 0L, 0L)
         _statusFlow.value = TorrentStreamStatus(state = "Idle")
+
+        scope.launch(Dispatchers.IO) {
+            delay(500)
+            purgeTorrentCache()
+        }
     }
 
     private fun buildMagnetUri(infoHash: String, name: String): String {

@@ -1,5 +1,6 @@
 package com.mystream.app.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -81,7 +82,9 @@ import com.mystream.app.data.model.AppSettingsConfig
 import com.mystream.app.data.repository.SourcesRepository
 import com.mystream.app.data.updater.AppUpdateCheckResult
 import com.mystream.app.data.updater.AppUpdateManager
+import com.mystream.app.player.MediaCacheManager
 import com.mystream.app.ui.components.AppUpdateDialog
+import kotlinx.coroutines.Dispatchers
 import com.mystream.app.ui.theme.AccentRed
 import com.mystream.app.ui.theme.BgDark
 import com.mystream.app.ui.theme.FocusRing
@@ -101,6 +104,8 @@ fun SettingsScreen(
     repository: SourcesRepository,
     onBack: () -> Unit
 ) {
+    BackHandler { onBack() }
+
     val appSettings by repository.appSettingsFlow.collectAsState(initial = AppSettingsConfig())
     var config by remember { mutableStateOf(repository.getJsonConfig()) }
 
@@ -125,6 +130,31 @@ fun SettingsScreen(
     var downloadProgress by remember { mutableStateOf(0) }
     var updateError by remember { mutableStateOf<String?>(null) }
     var updateStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    var cacheSizeBytes by remember { mutableStateOf(0L) }
+    var freeSpaceBytes by remember { mutableStateOf(0L) }
+    var isClearingCache by remember { mutableStateOf(false) }
+
+    fun refreshStorageStats() {
+        scope.launch(Dispatchers.IO) {
+            cacheSizeBytes = MediaCacheManager.getTotalCacheSizeBytes(context)
+            freeSpaceBytes = MediaCacheManager.getDeviceFreeSpaceBytes(context)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        refreshStorageStats()
+    }
+
+    fun formatStorageBytes(bytes: Long): String {
+        if (bytes <= 0) return "0 MB"
+        val mb = bytes.toDouble() / (1024.0 * 1024.0)
+        return if (mb >= 1024.0) {
+            String.format(java.util.Locale.US, "%.2f GB", mb / 1024.0)
+        } else {
+            String.format(java.util.Locale.US, "%.1f MB", mb)
+        }
+    }
 
     if (showUpdateDialog && updateResult != null) {
         AppUpdateDialog(
@@ -658,11 +688,110 @@ fun SettingsScreen(
                 }
             }
 
-            // 4. App Version & Updates
+            // 4. Device Storage & App Cache
             item {
                 Spacer(modifier = Modifier.height(20.dp))
                 Text(
-                    text = "4. App Version & Updates",
+                    text = "4. Device Storage & App Cache",
+                    color = PrimaryNeon,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+                    border = BorderStroke(1.dp, GlassBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "App Cache: ${formatStorageBytes(cacheSizeBytes)}",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = "Device Free Storage: ${formatStorageBytes(freeSpaceBytes)}",
+                                    color = if (freeSpaceBytes < 1024L * 1024L * 1024L) Color(0xFFFF6B6B) else TextMuted,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+
+                            val clearInteraction = remember { MutableInteractionSource() }
+                            val isClearFocused by clearInteraction.collectIsFocusedAsState()
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (isClearFocused) FocusRingOrange.copy(alpha = 0.25f)
+                                        else if (isClearingCache) SurfaceCard
+                                        else Color(0xFFFF6B6B).copy(alpha = 0.15f)
+                                    )
+                                    .border(
+                                        if (isClearFocused) 2.dp else 1.dp,
+                                        if (isClearFocused) FocusRingOrange else Color(0xFFFF6B6B).copy(alpha = 0.5f),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .focusable(interactionSource = clearInteraction)
+                                    .clickable(interactionSource = clearInteraction, indication = null) {
+                                        if (isClearingCache) return@clickable
+                                        isClearingCache = true
+                                        MediaCacheManager.clearAllAppCaches(context) {
+                                            isClearingCache = false
+                                            refreshStorageStats()
+                                            android.widget.Toast.makeText(context, "All app cache cleared successfully!", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isClearingCache) {
+                                    CircularProgressIndicator(
+                                        color = FocusRingOrange,
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Clear Cache Now",
+                                        color = if (isClearFocused) FocusRingOrange else Color(0xFFFF6B6B),
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Cleans temporary video buffers, downloaded torrent chunks, image thumbnails, and obsolete update APKs. Watch history and settings remain safe.",
+                            color = TextMuted,
+                            fontSize = 10.5.sp,
+                            lineHeight = 14.sp
+                        )
+                    }
+                }
+            }
+
+            // 5. App Version & Updates
+            item {
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    text = "5. App Version & Updates",
                     color = PrimaryNeon,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold
