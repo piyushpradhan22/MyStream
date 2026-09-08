@@ -112,6 +112,8 @@ import com.mystream.app.ui.theme.TextMuted
 import com.mystream.app.ui.theme.TextPrimary
 import com.mystream.app.ui.theme.TextSecondary
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -339,23 +341,28 @@ fun HomeScreen(
     var enrichedCwMeta by remember { mutableStateOf<Map<String, StremioMetaPreview>>(emptyMap()) }
     LaunchedEffect(continueWatchingList) {
         if (continueWatchingList.isEmpty()) return@LaunchedEffect
-        val enriched = mutableMapOf<String, StremioMetaPreview>()
-        continueWatchingList.forEach { record ->
-            try {
-                val meta = repository.fetchMetaDetail(record.type, record.imdbId)
-                enriched[record.imdbId] = StremioMetaPreview(
-                    id = record.imdbId,
-                    type = record.type,
-                    name = record.title,
-                    poster = record.posterUrl ?: meta.poster,
-                    background = record.backdropUrl ?: meta.background,
-                    imdbRating = meta.imdbRating,
-                    year = meta.year ?: meta.releaseInfo,
-                    releaseInfo = meta.releaseInfo ?: meta.year,
-                    genres = if (meta.genres.isNotEmpty()) meta.genres else listOfNotNull(record.subtitle),
-                    description = meta.description
-                )
-            } catch (_: Exception) { /* graceful degradation */ }
+        // Fetch all titles concurrently (each call is repository-cached) so the row
+        // populates in one round-trip's time instead of serially per title.
+        val enriched = coroutineScope {
+            continueWatchingList.map { record ->
+                async(Dispatchers.IO) {
+                    try {
+                        val meta = repository.fetchMetaDetail(record.type, record.imdbId)
+                        record.imdbId to StremioMetaPreview(
+                            id = record.imdbId,
+                            type = record.type,
+                            name = record.title,
+                            poster = record.posterUrl ?: meta.poster,
+                            background = record.backdropUrl ?: meta.background,
+                            imdbRating = meta.imdbRating,
+                            year = meta.year ?: meta.releaseInfo,
+                            releaseInfo = meta.releaseInfo ?: meta.year,
+                            genres = if (meta.genres.isNotEmpty()) meta.genres else listOfNotNull(record.subtitle),
+                            description = meta.description
+                        )
+                    } catch (_: Exception) { null }
+                }
+            }.awaitAll().filterNotNull().toMap()
         }
         enrichedCwMeta = enriched
     }

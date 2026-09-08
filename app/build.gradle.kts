@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.androidx.baselineprofile)
     id("com.chaquo.python")
 }
 
@@ -60,6 +61,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -122,6 +124,16 @@ dependencies {
 
     // DataStore
     implementation(libs.androidx.datastore.preferences)
+
+    // Baseline Profile installer
+    implementation(libs.androidx.profileinstaller)
+
+    // YouTube trailer extraction (native ExoPlayer playback, replaces WebView)
+    implementation(libs.newpipe.extractor)
+    coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
+
+    // Measured baseline profile produced by the :baselineprofile module
+    baselineProfile(project(":baselineprofile"))
 
     // BitTorrent Engine & Embedded Localhost Streaming Server
     implementation(libs.nanohttpd)

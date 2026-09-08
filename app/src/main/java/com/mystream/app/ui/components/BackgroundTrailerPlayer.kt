@@ -1,15 +1,8 @@
 package com.mystream.app.ui.components
 
-import android.annotation.SuppressLint
-import android.view.ViewGroup
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import android.view.LayoutInflater
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,30 +16,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.ui.PlayerView
+import com.mystream.app.R
+import com.mystream.app.data.youtube.YouTubeTrailerResolver
 
-private class BackgroundYouTubeJsBridge(
-    private val onVideoPlaying: () -> Unit,
-    private val onVideoEnded: () -> Unit,
-    private val onVideoError: (Int) -> Unit
-) {
-    @JavascriptInterface
-    fun onStateChange(state: Int) {
-        // 1 = YT.PlayerState.PLAYING, 0 = YT.PlayerState.ENDED
-        if (state == 1) {
-            onVideoPlaying()
-        } else if (state == 0) {
-            onVideoEnded()
-        }
-    }
+private const val TRAILER_UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
-    @JavascriptInterface
-    fun onError(code: Int) {
-        onVideoError(code)
-    }
-}
-
-@SuppressLint("SetJavaScriptEnabled")
+/**
+ * Ambient background trailer, played natively in ExoPlayer. The YouTube id is resolved to a
+ * direct stream via NewPipeExtractor (no WebView). Same signature as before so callers are unchanged.
+ */
+@OptIn(UnstableApi::class)
 @Composable
 fun BackgroundTrailerPlayer(
     ytId: String,
@@ -57,316 +48,89 @@ fun BackgroundTrailerPlayer(
     onPlaybackStarted: (() -> Unit)? = null,
     onVideoEnded: (() -> Unit)? = null
 ) {
-    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    val context = LocalContext.current
     var isVideoReady by remember { mutableStateOf(false) }
 
-    // Register TrailerPlaybackManager command listener for in-place video switching and playback control
+    val dataSourceFactory = remember {
+        DefaultDataSource.Factory(
+            context,
+            DefaultHttpDataSource.Factory()
+                .setUserAgent(TRAILER_UA)
+                .setAllowCrossProtocolRedirects(true)
+        )
+    }
+
+    val exoPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            repeatMode = Player.REPEAT_MODE_OFF
+            volume = if (isAudioMuted) 0f else 1f
+        }
+    }
+
     DisposableEffect(Unit) {
-        TrailerPlaybackManager.playerCommandListener = { cmd, arg ->
-            when (cmd) {
-                "LOAD_VIDEO" -> {
-                    if (!arg.isNullOrBlank()) {
-                        webViewInstance?.evaluateJavascript(
-                            "if (window.player && player.loadVideoById) { player.loadVideoById('$arg'); player.playVideo(); }",
-                            null
-                        )
-                    }
-                }
-                "LOAD_OR_REPLAY" -> {
-                    if (!arg.isNullOrBlank()) {
-                        webViewInstance?.evaluateJavascript(
-                            "if (window.player) { if (player.getVideoData && player.getVideoData().video_id === '$arg') { player.seekTo(0, true); player.playVideo(); } else if (player.loadVideoById) { player.loadVideoById('$arg'); player.playVideo(); } }",
-                            null
-                        )
-                    }
-                }
-                "PAUSE" -> {
-                    webViewInstance?.evaluateJavascript("if (window.player && player.pauseVideo) { player.pauseVideo(); }", null)
-                }
-                "RESUME" -> {
-                    webViewInstance?.evaluateJavascript("if (window.player && player.playVideo) { player.playVideo(); }", null)
-                }
-                "MUTE" -> {
-                    webViewInstance?.evaluateJavascript("if (window.player && player.mute) { player.mute(); }", null)
-                }
-                "UNMUTE" -> {
-                    webViewInstance?.evaluateJavascript("if (window.player && player.unMute) { player.unMute(); player.setVolume(85); }", null)
+        val listener = object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                isVideoReady = true
+                onPlaybackStarted?.invoke()
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    isVideoReady = false
+                    onVideoEnded?.invoke()
                 }
             }
         }
+        exoPlayer.addListener(listener)
         onDispose {
-            TrailerPlaybackManager.playerCommandListener = null
-            try {
-                webViewInstance?.apply {
-                    stopLoading()
-                    loadUrl("about:blank")
-                    clearHistory()
-                    removeAllViews()
-                    destroy()
-                }
-            } catch (_: Exception) {}
+            exoPlayer.removeListener(listener)
+            exoPlayer.release()
         }
     }
 
-    // Dynamic video loading when ytId changes without recreating the WebView
-    LaunchedEffect(ytId, webViewInstance) {
-        if (webViewInstance != null && ytId.isNotBlank()) {
-            webViewInstance?.evaluateJavascript(
-                "if (window.player && player.loadVideoById) { if (!player.getVideoData || player.getVideoData().video_id !== '$ytId') { player.loadVideoById('$ytId'); player.playVideo(); } }",
-                null
-            )
+    // Resolve the YouTube id to a direct stream and load it (graceful no-op on failure).
+    LaunchedEffect(ytId) {
+        isVideoReady = false
+        if (ytId.isBlank()) {
+            exoPlayer.stop()
+            return@LaunchedEffect
         }
-    }
-
-    // Update mute state dynamically on the running player
-    LaunchedEffect(isAudioMuted, webViewInstance) {
-        val jsCmd = if (isAudioMuted) {
-            "if (window.player && player.mute) { player.mute(); }"
+        val resolved = YouTubeTrailerResolver.resolve(ytId) ?: return@LaunchedEffect
+        val videoSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+            .createMediaSource(MediaItem.fromUri(resolved.videoUrl))
+        val mediaSource = if (resolved.audioUrl != null) {
+            val audioSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                .createMediaSource(MediaItem.fromUri(resolved.audioUrl))
+            MergingMediaSource(videoSource, audioSource)
         } else {
-            "if (window.player && player.unMute) { player.unMute(); player.setVolume(85); }"
+            videoSource
         }
-        webViewInstance?.evaluateJavascript(jsCmd, null)
+        exoPlayer.setMediaSource(mediaSource)
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = !isStopped
     }
 
-    // Stop playback dynamically when isStopped becomes true
-    LaunchedEffect(isStopped, webViewInstance) {
-        if (isStopped) {
-            webViewInstance?.evaluateJavascript("if (window.player && player.stopVideo) { player.stopVideo(); }", null)
-            isVideoReady = false
-        }
+    LaunchedEffect(isAudioMuted) { exoPlayer.volume = if (isAudioMuted) 0f else 1f }
+    LaunchedEffect(isStopped) {
+        exoPlayer.playWhenReady = !isStopped
+        if (isStopped) isVideoReady = false
     }
 
-    // Dynamically adjust player layout when transitioning between HomeScreen and DetailScreen
-    LaunchedEffect(isHomeScreen, webViewInstance) {
-        val jsCmd = if (isHomeScreen) {
-            """
-            var el = document.getElementById('player');
-            if (el) {
-                el.style.position = 'absolute';
-                el.style.top = '0';
-                el.style.left = '0';
-                el.style.right = '0';
-                el.style.bottom = '0';
-                el.style.width = '100%';
-                el.style.height = '100%';
-                el.style.transform = 'scale(1.3)';
-                el.style.transformOrigin = 'center center';
-            }
-            """.trimIndent()
-        } else {
-            """
-            var el = document.getElementById('player');
-            if (el) {
-                el.style.position = 'absolute';
-                el.style.top = '0';
-                el.style.left = '0';
-                el.style.right = '0';
-                el.style.bottom = '0';
-                el.style.width = '100%';
-                el.style.height = '100%';
-                el.style.transform = 'none';
-                el.style.transformOrigin = 'center center';
-            }
-            """.trimIndent()
-        }
-        webViewInstance?.evaluateJavascript(jsCmd, null)
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.Transparent)
-    ) {
-        val alpha by androidx.compose.animation.core.animateFloatAsState(
+    Box(modifier = modifier.fillMaxSize().background(Color.Transparent)) {
+        val alpha by animateFloatAsState(
             targetValue = if (isVideoReady && !isStopped) 1f else 0f,
-            animationSpec = androidx.compose.animation.core.tween(400),
+            animationSpec = tween(400),
             label = "TrailerAlpha"
         )
-
         AndroidView(
-            modifier = Modifier
-                .fillMaxSize()
-                .alpha(alpha),
+            modifier = Modifier.fillMaxSize().alpha(alpha),
             factory = { ctx ->
-                WebView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
+                (LayoutInflater.from(ctx).inflate(R.layout.view_background_trailer, null) as PlayerView).apply {
                     isFocusable = false
                     isFocusableInTouchMode = false
                     setBackgroundColor(0x00000000)
-                    webChromeClient = WebChromeClient()
-                    webViewClient = object : WebViewClient() {}
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        mediaPlaybackRequiresUserGesture = false
-                        useWideViewPort = true
-                        loadWithOverviewMode = true
-                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                        userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
-                    }
-                    addJavascriptInterface(
-                        BackgroundYouTubeJsBridge(
-                            onVideoPlaying = {
-                                post {
-                                    isVideoReady = true
-                                    onPlaybackStarted?.invoke()
-                                }
-                            },
-                            onVideoEnded = {
-                                post {
-                                    isVideoReady = false
-                                    onVideoEnded?.invoke()
-                                }
-                            },
-                            onVideoError = { _ ->
-                                post {
-                                    isVideoReady = false
-                                }
-                            }
-                        ),
-                        "AndroidBridge"
-                    )
-
-                    val playerStyle = if (isHomeScreen) {
-                        """
-                        #player {
-                            position: absolute;
-                            top: 0;
-                            left: 0;
-                            right: 0;
-                            bottom: 0;
-                            width: 100%;
-                            height: 100%;
-                            transform: scale(1.3);
-                            transform-origin: center center;
-                            border: none;
-                            transition: transform 0.4s ease-in-out;
-                        }
-                        """.trimIndent()
-                    } else {
-                        """
-                        #player {
-                            position: absolute;
-                            top: 0;
-                            left: 0;
-                            right: 0;
-                            bottom: 0;
-                            width: 100%;
-                            height: 100%;
-                            transform: none;
-                            transform-origin: center center;
-                            border: none;
-                            transition: transform 0.4s ease-in-out;
-                        }
-                        """.trimIndent()
-                    }
-                        val muteParam = if (isAudioMuted) "1" else "0"
-                        val htmlContent = """
-                            <!DOCTYPE html>
-                            <html>
-                            <head>
-                                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-                                <style>
-                                    * { box-sizing: border-box; margin: 0; padding: 0; }
-                                    body, html {
-                                        width: 100vw;
-                                        height: 100vh;
-                                        background-color: transparent;
-                                        overflow: hidden;
-                                        pointer-events: none;
-                                    }
-                                    $playerStyle
-                                    .ytp-chrome-top, .ytp-title, .ytp-title-channel, .ytp-watermark, .ytp-pause-overlay, .ytp-gradient-top, .ytp-show-cards-title, .ytp-ce-element,
-                                    .caption-window, .ytp-caption-window-bottom, .ytp-caption-segment, .ytp-subtitles-player, .ytp-caption-window-rollup, div[class*="caption-window"], div[class*="ytp-caption"], span[class*="caption"] {
-                                        display: none !important;
-                                        opacity: 0 !important;
-                                        visibility: hidden !important;
-                                    }
-                                </style>
-                            </head>
-                            <body>
-                                <div id="player"></div>
-                                <script>
-                                    var tag = document.createElement('script');
-                                    tag.src = "https://www.youtube.com/iframe_api";
-                                    var firstScriptTag = document.getElementsByTagName('script')[0];
-                                    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-                                    var player;
-                                    function onYouTubeIframeAPIReady() {
-                                        player = new YT.Player('player', {
-                                            videoId: '$ytId',
-                                            playerVars: {
-                                                'autoplay': 1,
-                                                'controls': 0,
-                                                'rel': 0,
-                                                'showinfo': 0,
-                                                'iv_load_policy': 3,
-                                                'modestbranding': 1,
-                                                'playsinline': 1,
-                                                'enablejsapi': 1,
-                                                'fs': 0,
-                                                'disablekb': 1,
-                                                'loop': 0,
-                                                'cc_load_policy': 0,
-                                                'cc_lang_pref': '',
-                                                'origin': 'https://www.youtube-nocookie.com',
-                                                'mute': $muteParam
-                                            },
-                                            events: {
-                                                'onReady': onPlayerReady,
-                                                'onStateChange': onPlayerStateChange,
-                                                'onError': onPlayerError
-                                            }
-                                        });
-                                    }
-
-                                    function disableCaptions(p) {
-                                        try {
-                                            if (p && p.unloadModule) {
-                                                p.unloadModule("captions");
-                                                p.unloadModule("cc");
-                                            }
-                                            if (p && p.setOption) {
-                                                p.setOption("captions", "track", {});
-                                                p.setOption("cc", "track", {});
-                                            }
-                                        } catch (e) {}
-                                    }
-
-                                    function onPlayerReady(event) {
-                                        disableCaptions(event.target);
-                                        if ($muteParam === 0) {
-                                            event.target.unMute();
-                                            event.target.setVolume(85);
-                                        }
-                                        event.target.playVideo();
-                                    }
-
-                                    function onPlayerStateChange(event) {
-                                        disableCaptions(event.target);
-                                        if (window.AndroidBridge && window.AndroidBridge.onStateChange) {
-                                            window.AndroidBridge.onStateChange(event.data);
-                                        }
-                                    }
-
-                                    function onPlayerError(event) {
-                                        if (window.AndroidBridge && window.AndroidBridge.onError) {
-                                            window.AndroidBridge.onError(event.data);
-                                        }
-                                    }
-                                </script>
-                            </body>
-                            </html>
-                        """.trimIndent()
-
-                        loadDataWithBaseURL("https://www.youtube-nocookie.com", htmlContent, "text/html", "UTF-8", null)
-                        webViewInstance = this
-                    }
+                    player = exoPlayer
                 }
-            )
+            }
+        )
     }
 }

@@ -1,0 +1,51 @@
+# Baseline profile for MyStream — compiled ahead-of-time on first run to remove
+# JIT warmup jank during app startup and home-screen D-pad scrolling on weak Android TV.
+# Rules use the human-readable ART profile format (H=hot, S=startup, P=post-startup).
+
+# --- Application & Activity startup ---
+HSPLcom/mystream/app/MainActivity;->**(**)**
+HSPLcom/mystream/app/MainActivity$**;->**(**)**
+Lcom/mystream/app/MainActivity;
+HSPLcom/mystream/app/MyStreamApplication;->**(**)**
+HSPLcom/mystream/app/MyStreamApplication$**;->**(**)**
+Lcom/mystream/app/MyStreamApplication;
+
+# --- Home screen composition & D-pad scroll hot path ---
+HSPLcom/mystream/app/ui/screens/HomeScreenKt;->**(**)**
+HSPLcom/mystream/app/ui/screens/HomeScreenKt$**;->**(**)**
+Lcom/mystream/app/ui/screens/HomeScreenKt;
+HSPLcom/mystream/app/ui/screens/OttCategory;->**(**)**
+Lcom/mystream/app/ui/screens/OttCategory;
+
+# --- Poster cards (rendered per item while scrolling) ---
+HSPLcom/mystream/app/ui/components/PosterCardKt;->**(**)**
+HSPLcom/mystream/app/ui/components/PosterCardKt$**;->**(**)**
+Lcom/mystream/app/ui/components/PosterCardKt;
+
+# --- Hero spotlight, sidebar & trailer surface ---
+HSPLcom/mystream/app/ui/components/OttHeroSpotlightKt;->**(**)**
+HSPLcom/mystream/app/ui/components/OttHeroSpotlightKt$**;->**(**)**
+HSPLcom/mystream/app/ui/components/OttLeftSidebarKt;->**(**)**
+HSPLcom/mystream/app/ui/components/OttLeftSidebarKt$**;->**(**)**
+HSPLcom/mystream/app/ui/components/TrailerPlaybackManager;->**(**)**
+Lcom/mystream/app/ui/components/TrailerPlaybackManager;
+HSPLcom/mystream/app/ui/components/BackgroundTrailerPlayerKt;->**(**)**
+HSPLcom/mystream/app/ui/components/BackgroundTrailerPlayerKt$**;->**(**)**
+
+# --- Theme (colors/shapes read during every composition) ---
+HSPLcom/mystream/app/ui/theme/**;->**(**)**
+Lcom/mystream/app/ui/theme/**;
+
+# --- Data models bound into list/hero UI ---
+HSPLcom/mystream/app/data/model/**;->**(**)**
+Lcom/mystream/app/data/model/**;
+
+# --- Repository & catalog API on the startup fetch path ---
+HSPLcom/mystream/app/data/repository/SourcesRepository;->**(**)**
+HSPLcom/mystream/app/data/repository/SourcesRepository$**;->**(**)**
+HSPLcom/mystream/app/data/api/StremioApiClient;->**(**)**
+HSPLcom/mystream/app/data/api/StremioApiClient$**;->**(**)**
+
+# --- Player warm-up (post-startup, first playback) ---
+HSPLcom/mystream/app/player/MyStreamPlayerManager;->**(**)**
+HSPLcom/mystream/app/player/MyStreamPlayerManager$**;->**(**)**

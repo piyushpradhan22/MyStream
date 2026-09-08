@@ -462,7 +462,8 @@ class MyStreamPlayerManager(
                         Log.d(TAG, "Player Status: pos=${_currentPosition.value / 1000}s/${_duration.value / 1000}s, buf=${_bufferedPosition.value / 1000}s (${_bufferPercentage.value}%), speed=$speedStr, state=${player.playbackState}, isBuffering=${_isBuffering.value}")
                     }
                 }
-                delay(500)
+                // Poll at 500ms while actively playing; back off to 1s when paused/idle to cut wakeups on weak TV.
+                delay(if (player.isPlaying) 500 else 1000)
             }
         }
     }

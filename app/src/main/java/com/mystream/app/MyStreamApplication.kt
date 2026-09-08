@@ -28,6 +28,18 @@ class MyStreamApplication : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         sourcesRepository = SourcesRepository(this)
         playerManager = MyStreamPlayerManager(this, sourcesRepository = sourcesRepository)
+
+        // Initialize YouTube trailer extractor so trailers can play natively in ExoPlayer (no WebView).
+        val ytClient = OkHttpClient.Builder()
+            .dns(SystemFallbackDns)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .build()
+        com.mystream.app.data.youtube.YouTubeTrailerResolver.init(
+            com.mystream.app.data.youtube.NewPipeDownloader(ytClient)
+        )
     }
 
     private var imageLoaderInstance: ImageLoader? = null

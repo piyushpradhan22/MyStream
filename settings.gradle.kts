@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "MyStream"
 include(":app")
+include(":baselineprofile")
