@@ -241,7 +241,9 @@ fun HomeScreen(
     LaunchedEffect(selectedCategoryId) {
         if (selectedCategoryId != lastActiveCategoryId) {
             lastActiveCategoryId = selectedCategoryId
-            cardFocusRequesters.clear()
+            // NOTE: do NOT clear cardFocusRequesters here — the new category's cards compose (and
+            // register their requesters) BEFORE this effect runs, so clearing would wipe them and
+            // leave DOWN-from-hero unable to focus any card. Requesters are index-keyed and reusable.
             focusedCardIndex = 0
             try {
                 carouselListState.scrollToItem(0)
@@ -510,7 +512,10 @@ fun HomeScreen(
 
     // Robust card focus helper: scrolls to card and requests focus with retry
     suspend fun focusCardAtIndex(index: Int) {
-        if (currentCategoryItems.isEmpty()) return
+        if (currentCategoryItems.isEmpty()) {
+            android.util.Log.d("HomeFocus", "focusCardAtIndex: no items in category, cannot move down")
+            return
+        }
         val targetIdx = index.coerceIn(0, (currentCategoryItems.size - 1).coerceAtLeast(0))
         focusedCardIndex = targetIdx
         currentCategoryItems.getOrNull(targetIdx)?.let { focusedItem = it }
@@ -521,13 +526,21 @@ fun HomeScreen(
                 carouselListState.scrollToItem(targetIdx)
             } catch (_: Exception) {}
         }
+        for (retry in 0..10) {
+            delay(50)
+            cardFocusRequesters[targetIdx]?.let { if (it.safeRequestFocus()) return }
+        }
+        // Fallback so DOWN never dead-ends: focus the first on-screen card (or any registered card).
         for (retry in 0..6) {
             delay(50)
-            val fr = cardFocusRequesters[targetIdx]
+            val firstVisible = carouselListState.layoutInfo.visibleItemsInfo.firstOrNull()?.index
+            val fr = firstVisible?.let { cardFocusRequesters[it] } ?: cardFocusRequesters.entries.minByOrNull { it.key }?.value
             if (fr != null && fr.safeRequestFocus()) {
-                break
+                android.util.Log.d("HomeFocus", "focusCardAtIndex: target $targetIdx unavailable, focused fallback card")
+                return
             }
         }
+        android.util.Log.w("HomeFocus", "focusCardAtIndex FAILED (target=$targetIdx, items=${currentCategoryItems.size}, visible=${carouselListState.layoutInfo.visibleItemsInfo.map { it.index }}, requesters=${cardFocusRequesters.keys})")
     }
 
     // Auto-focus first card in bottom carousel on initial load (defaults to first card of Continue Watching)
