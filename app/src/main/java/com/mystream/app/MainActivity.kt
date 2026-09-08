@@ -205,7 +205,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onPlayDirect = { item ->
                         activePlaybackItem = item
-                        navController.navigate("player")
+                        navController.navigate("player") { launchSingleTop = true }
                     },
                     onNavigateToSearch = {
                         navController.navigate("search")
@@ -267,7 +267,7 @@ class MainActivity : ComponentActivity() {
                     onBack = { navController.popBackStack() },
                     onPlay = { item ->
                         activePlaybackItem = item
-                        navController.navigate("player")
+                        navController.navigate("player") { launchSingleTop = true }
                     }
                 )
             }
@@ -459,9 +459,13 @@ class MainActivity : ComponentActivity() {
             KeyEvent.KEYCODE_BACK,
             KeyEvent.KEYCODE_ESCAPE -> {
                 app.playerManager.pause()
+                // Pop the player destination directly. Routing through
+                // onBackPressedDispatcher here did not reach the NavController
+                // callback, leaving an empty "player" destination on screen.
+                val popped = globalNavController?.popBackStack() ?: false
                 activePlaybackItem = null
-                onBackPressedDispatcher.onBackPressed()
-                Log.d(TAG, "back via keyCode=$keyCode")
+                if (!popped) onBackPressedDispatcher.onBackPressed()
+                Log.d(TAG, "back via keyCode=$keyCode popped=$popped")
                 return true
             }
         }
