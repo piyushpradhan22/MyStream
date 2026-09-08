@@ -206,7 +206,6 @@ fun DetailScreen(
     val activeBackgroundTrailerYtId = userSelectedTrailerYtId
         ?: metaDetail?.effectiveTrailerYtId?.takeIf { it.isNotBlank() }
         ?: customTrailerYtId
-        ?: TrailerPlaybackManager.activeTrailerYtId
 
     val currentQueryId = if (metaDetail?.type.equals("series", ignoreCase = true)) {
         selectedEpisode?.id ?: id
@@ -387,8 +386,12 @@ fun DetailScreen(
         }
     }
 
-    LaunchedEffect(activeBackgroundTrailerYtId, appSettings.trailerPlaybackEnabled, appSettings.trailerAudioMuted) {
-        if (!activeBackgroundTrailerYtId.isNullOrBlank() && appSettings.trailerPlaybackEnabled) {
+    LaunchedEffect(activeBackgroundTrailerYtId, TrailerPlaybackManager.isPlaybackEnabled, appSettings.trailerAudioMuted) {
+        // Preserve pause state across navigation and never carry over the previous title's trailer:
+        // stop unless playback is enabled AND this title's own trailer id is resolved.
+        if (!TrailerPlaybackManager.isPlaybackEnabled || activeBackgroundTrailerYtId.isNullOrBlank()) {
+            TrailerPlaybackManager.stop()
+        } else {
             TrailerPlaybackManager.play(activeBackgroundTrailerYtId, appSettings.trailerAudioMuted, forceReplay = false)
         }
     }

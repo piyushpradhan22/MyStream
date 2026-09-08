@@ -655,7 +655,6 @@ class MyStreamPlayerManager(
         saveCurrentProgress()
         player.stop()
         player.clearMediaItems()
-        player.clearVideoSurface()
         _isPlaying.value = false
         _isBuffering.value = false
         _currentPosition.value = 0L
