@@ -25,6 +25,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -34,6 +40,12 @@ import com.mystream.app.data.model.ImdbIndianItem
 import java.util.UUID
 
 private val Context.dataStore by preferencesDataStore(name = "mystream_settings")
+
+/** Progress of a background stream load for one media/episode. */
+data class StreamLoadState(
+    val streams: List<StremioStreamSource> = emptyList(),
+    val isLoading: Boolean = false
+)
 
 class SourcesRepository(
     private val context: Context,
@@ -652,6 +664,52 @@ class SourcesRepository(
     }
 
     private val memoryTorrentsCache = mutableMapOf<String, List<StremioStreamSource>>()
+
+    // --- Background stream loading that survives DetailScreen navigation ---
+    // Loads run on this app-scoped scope (not the composable's), so leaving the
+    // screen mid-load does NOT cancel resolution; results keep streaming & caching.
+    private val streamLoadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val activeStreamLoads = java.util.concurrent.ConcurrentHashMap<String, Job>()
+    private val streamLoadFlows = java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<StreamLoadState>>()
+
+    private fun streamFlowFor(cacheKey: String): MutableStateFlow<StreamLoadState> =
+        streamLoadFlows.getOrPut(cacheKey) { MutableStateFlow(StreamLoadState()) }
+
+    /** Observe the streams for a media/episode; reflects background progress across navigation. */
+    fun observeStreams(type: String, imdbId: String): StateFlow<StreamLoadState> =
+        streamFlowFor("$type:$imdbId").asStateFlow()
+
+    /** Start (or resume/dedupe) a background stream load. Safe to call repeatedly. */
+    fun startStreamLoad(type: String, imdbId: String, forceRefresh: Boolean = false) {
+        val cacheKey = "$type:$imdbId"
+        val flow = streamFlowFor(cacheKey)
+        synchronized(activeStreamLoads) {
+            val existing = activeStreamLoads[cacheKey]
+            if (forceRefresh) {
+                existing?.cancel()
+                flow.value = StreamLoadState(isLoading = true)
+            } else if (existing?.isActive == true) {
+                return // already loading; observers receive updates
+            } else {
+                flow.value = flow.value.copy(isLoading = true)
+            }
+            val job = streamLoadScope.launch {
+                try {
+                    streamStreamsForMedia(type, imdbId, forceRefresh).collect { list ->
+                        flow.value = StreamLoadState(streams = list, isLoading = true)
+                    }
+                } catch (e: CancellationException) {
+                    // forced-refresh cancel; ignore
+                } catch (e: Exception) {
+                    Log.w("SourcesRepository", "Background stream load failed for $cacheKey: ${e.message}")
+                } finally {
+                    flow.value = flow.value.copy(isLoading = false)
+                    activeStreamLoads.remove(cacheKey)
+                }
+            }
+            activeStreamLoads[cacheKey] = job
+        }
+    }
 
     fun clearStreamsCache(type: String, imdbId: String) {
         val cacheKey = "$type:$imdbId"

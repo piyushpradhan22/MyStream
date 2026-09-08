@@ -270,6 +270,8 @@ fun PlayerScreen(
         playerManager.playMedia(item)
 
         onDispose {
+            // Destroy playback so the next stream starts clean (no stale frame/state).
+            playerManager.stopAndClear()
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             view.keepScreenOn = false
 
@@ -758,6 +760,7 @@ fun PlayerScreen(
                 PlayerView(ctx).apply {
                     this.player = playerManager.player
                     useController = false // We use our sleek Compose HUD controls
+                    setKeepContentOnPlayerReset(false) // Don't hold the previous video's last frame
                     setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                     resizeMode = playerManager.getResizeModeForAspectRatio(aspectRatio)
                     keepScreenOn = true

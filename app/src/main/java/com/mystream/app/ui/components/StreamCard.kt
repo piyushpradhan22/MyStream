@@ -122,14 +122,9 @@ fun StreamCard(
                 .onPreviewKeyEvent { keyEvent ->
                     if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when (keyEvent.key) {
+                        // Right moves across cards, never into the inner action buttons.
                         Key.DirectionRight -> {
-                            if (onPikPakStream != null && !isResolving) {
-                                pikpakFocusRequester.safeRequestFocus()
-                                true
-                            } else if (onRestart != null && !isResolving) {
-                                restartFocusRequester.safeRequestFocus()
-                                true
-                            } else if (onRight != null) {
+                            if (onRight != null) {
                                 onRight()
                                 true
                             } else true
@@ -149,11 +144,23 @@ fun StreamCard(
                             } else false
                         }
 
+                        // Down enters the inner action buttons (PP / restart); otherwise delegates.
                         Key.DirectionDown -> {
-                            if (onDown != null) {
-                                onDown()
-                                true
-                            } else false
+                            when {
+                                onPikPakStream != null && !isResolving -> {
+                                    pikpakFocusRequester.safeRequestFocus()
+                                    true
+                                }
+                                onRestart != null && !isResolving -> {
+                                    restartFocusRequester.safeRequestFocus()
+                                    true
+                                }
+                                onDown != null -> {
+                                    onDown()
+                                    true
+                                }
+                                else -> false
+                            }
                         }
 
                         Key.DirectionCenter,
@@ -358,10 +365,8 @@ fun StreamCard(
                                     }
 
                                     Key.DirectionUp -> {
-                                        if (onUp != null) {
-                                            onUp()
-                                            true
-                                        } else false
+                                        cardFocusRequester.safeRequestFocus()
+                                        true
                                     }
 
                                     Key.DirectionDown -> {
@@ -450,8 +455,6 @@ fun StreamCard(
                                     Key.DirectionUp -> {
                                         if (onPikPakStream != null && !isResolving) {
                                             pikpakFocusRequester.safeRequestFocus()
-                                        } else if (onUp != null) {
-                                            onUp()
                                         } else {
                                             cardFocusRequester.safeRequestFocus()
                                         }

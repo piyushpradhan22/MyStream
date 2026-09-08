@@ -650,6 +650,25 @@ class MyStreamPlayerManager(
         player.pause()
     }
 
+    // Fully tears down the current playback so no stale frame/state leaks into the next stream.
+    fun stopAndClear() {
+        saveCurrentProgress()
+        player.stop()
+        player.clearMediaItems()
+        player.clearVideoSurface()
+        _isPlaying.value = false
+        _isBuffering.value = false
+        _currentPosition.value = 0L
+        _bufferedPosition.value = 0L
+        _bufferPercentage.value = 0
+        _duration.value = 0L
+        _currentItem.value = null
+        _errorMessage.value = null
+        _isArchiveActivating.value = false
+        _archiveRetryCount.value = 0
+        streamDurationFallbackMs = 0L
+    }
+
     fun togglePlayPause() {
         if (player.isPlaying) pause() else play()
     }

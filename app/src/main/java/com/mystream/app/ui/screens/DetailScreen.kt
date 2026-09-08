@@ -214,6 +214,18 @@ fun DetailScreen(
         id
     }
 
+    // Reflect background stream-load progress for the current media/episode. Survives navigation:
+    // the load runs on the repository scope, so returning re-attaches instead of restarting.
+    LaunchedEffect(currentQueryId) {
+        repository.observeStreams(type, currentQueryId).collect { st ->
+            streams = st.streams
+            isResolvingMoreStreams = st.isLoading
+            if (st.streams.isNotEmpty() || !st.isLoading) {
+                isStreamsLoading = false
+            }
+        }
+    }
+
     fun launchTorrentP2P(torrent: StremioStreamSource, fromBeginning: Boolean) {
         val hash = torrent.infoHash ?: torrent.url?.substringAfter("btih:")?.substringBefore("&")
         if (!hash.isNullOrBlank()) {
@@ -303,29 +315,18 @@ fun DetailScreen(
         }
     }
 
-    var streamLoadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var torrentsLoadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     fun loadStreams(queryId: String, forceRefresh: Boolean = false) {
-        streamLoadJob?.cancel()
-        streamLoadJob = scope.launch {
-            if (forceRefresh || streams.isEmpty()) {
-                isStreamsLoading = true
-                if (forceRefresh) streams = emptyList()
-            }
-            isResolvingMoreStreams = true
-            try {
-                repository.streamStreamsForMedia(type, queryId, forceRefresh = forceRefresh).collect { newStreams ->
-                    streams = newStreams
-                    isStreamsLoading = false
-                }
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-            } finally {
-                isStreamsLoading = false
-                isResolvingMoreStreams = false
-            }
+        if (forceRefresh) {
+            streams = emptyList()
+            isStreamsLoading = true
+        } else if (streams.isEmpty()) {
+            isStreamsLoading = true
         }
+        // Runs on the repository's app scope, so leaving the screen mid-load does NOT
+        // cancel resolution — streams keep resolving & caching in the background.
+        repository.startStreamLoad(type, queryId, forceRefresh = forceRefresh)
     }
 
     fun loadAllTorrents(queryId: String, forceRefresh: Boolean = false) {
