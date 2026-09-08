@@ -236,7 +236,7 @@ fun SearchScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(com.mystream.app.ui.theme.HotstarBg)
+            .background(com.mystream.app.ui.theme.AppBackgroundGradient)
     ) {
         Column(
             modifier = Modifier

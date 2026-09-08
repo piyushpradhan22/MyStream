@@ -65,6 +65,16 @@ val FocusRingOrangeGlow = FocusRingGlow
 
 // JioHotstar Theme & Layout Design Tokens
 val HotstarBg = Color(0xFF06080E)
+
+// Shared blended app background (diagonal indigo glow → deep black) used across all pages.
+val AppBackgroundGradient = Brush.linearGradient(
+    colors = listOf(
+        Color(0xFF1B2552),
+        Color(0xFF0C1122),
+        Color(0xFF07090F),
+        Color(0xFF05070A)
+    )
+)
 val HotstarSidebarGlass = Color(0xD906080E)
 val HotstarSidebarGlassExpanded = Color(0xF20A0E18)
 val HotstarPillActive = Color(0xFF38BDF8)

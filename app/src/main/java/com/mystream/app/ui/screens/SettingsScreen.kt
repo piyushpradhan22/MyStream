@@ -200,7 +200,7 @@ fun SettingsScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(com.mystream.app.ui.theme.HotstarBg)
+            .background(com.mystream.app.ui.theme.AppBackgroundGradient)
     ) {
         LazyColumn(
             state = listState,
@@ -218,7 +218,7 @@ fun SettingsScreen(
                     Text(
                         text = "Settings",
                         color = TextPrimary,
-                        fontSize = 20.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -232,7 +232,7 @@ fun SettingsScreen(
                 Text(
                     text = "1. Dynamic Accounts (PostgreSQL)",
                     color = PrimaryNeon,
-                    fontSize = 15.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(4.dp))
@@ -417,7 +417,7 @@ fun SettingsScreen(
                 Text(
                     text = "2. Audio & Subtitles Playback Preferences",
                     color = PrimaryNeon,
-                    fontSize = 15.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -583,7 +583,7 @@ fun SettingsScreen(
                 Text(
                     text = "3. Stream Links Local Cache & Expiry",
                     color = PrimaryNeon,
-                    fontSize = 15.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -672,7 +672,7 @@ fun SettingsScreen(
                 Text(
                     text = "4. Device Storage & App Cache",
                     color = PrimaryNeon,
-                    fontSize = 15.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -771,7 +771,7 @@ fun SettingsScreen(
                 Text(
                     text = "5. App Version & Updates",
                     color = PrimaryNeon,
-                    fontSize = 15.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(8.dp))

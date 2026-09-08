@@ -93,8 +93,8 @@ class MainActivity : ComponentActivity() {
                 Surface(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(com.mystream.app.ui.theme.HotstarBg),
-                    color = com.mystream.app.ui.theme.HotstarBg
+                        .background(com.mystream.app.ui.theme.AppBackgroundGradient),
+                    color = Color.Transparent
                 ) {
                     AppNavigation()
                 }
