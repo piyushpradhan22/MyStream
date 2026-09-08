@@ -251,46 +251,6 @@ fun SearchScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                val backInteraction = remember { MutableInteractionSource() }
-                val isBackFocused by backInteraction.collectIsFocusedAsState()
-
-                IconButton(
-                    onClick = onBack,
-                    interactionSource = backInteraction,
-                    modifier = Modifier
-                        .focusRequester(backFocusRequester)
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(if (isBackFocused) FocusRing else SurfaceCard)
-                        .border(
-                            if (isBackFocused) 2.dp else 1.dp,
-                            if (isBackFocused) FocusRing else GlassBorder,
-                            CircleShape
-                        )
-                        .onPreviewKeyEvent { keyEvent ->
-                            if (keyEvent.type == KeyEventType.KeyDown) {
-                                when (keyEvent.key) {
-                                    Key.DirectionRight -> {
-                                        searchFocusRequester.safeRequestFocus()
-                                        true
-                                    }
-                                    Key.DirectionDown -> {
-                                        chipAllFocusRequester.safeRequestFocus()
-                                        true
-                                    }
-                                    else -> false
-                                }
-                            } else false
-                        }
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = if (isBackFocused) Color.Black else TextPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
                 val searchInteractionSource = remember { MutableInteractionSource() }
                 val isSearchFocused by searchInteractionSource.collectIsFocusedAsState()
 
@@ -330,7 +290,7 @@ fun SearchScreen(
                         }
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(24.dp),
                     interactionSource = searchInteractionSource,
                     keyboardOptions = KeyboardOptions(
                         imeAction = ImeAction.Search,
@@ -357,14 +317,14 @@ fun SearchScreen(
                         unfocusedBorderColor = GlassBorder
                     ),
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth(0.55f)
                         .focusRequester(searchFocusRequester)
                         .onFocusChanged { isSearchFieldFocused = it.isFocused }
                         .onPreviewKeyEvent { keyEvent ->
                             if (keyEvent.type == KeyEventType.KeyDown) {
                                 when (keyEvent.key) {
                                     Key.DirectionLeft -> {
-                                        backFocusRequester.safeRequestFocus()
+                                        // No back button; consume so focus stays on the field.
                                         true
                                     }
 

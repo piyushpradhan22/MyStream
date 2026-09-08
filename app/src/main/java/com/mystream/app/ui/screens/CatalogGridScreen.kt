@@ -178,39 +178,6 @@ fun CatalogGridScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    val backInteraction = remember { MutableInteractionSource() }
-                    val isBackFocused by backInteraction.collectIsFocusedAsState()
-
-                    IconButton(
-                        onClick = onBack,
-                        interactionSource = backInteraction,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isBackFocused) FocusRing else SurfaceCard)
-                            .border(
-                                if (isBackFocused) 2.dp else 1.dp,
-                                if (isBackFocused) FocusRing else GlassBorder,
-                                RoundedCornerShape(12.dp)
-                            )
-                            .onPreviewKeyEvent { keyEvent ->
-                                if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
-                                    try {
-                                        firstItemFocusRequester.requestFocus()
-                                        true
-                                    } catch (_: Exception) {
-                                        false
-                                    }
-                                } else false
-                            }
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = if (isBackFocused) Color.Black else TextPrimary
-                        )
-                    }
-
                     Column {
                         Text(
                             text = title,

@@ -215,29 +215,6 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val backInteraction = remember { MutableInteractionSource() }
-                    val isBackFocused by backInteraction.collectIsFocusedAsState()
-
-                    IconButton(
-                        onClick = onBack,
-                        interactionSource = backInteraction,
-                        modifier = Modifier
-                            .focusRequester(backButtonFocusRequester)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isBackFocused) FocusRing else SurfaceCard)
-                            .border(
-                                if (isBackFocused) 2.dp else 1.dp,
-                                if (isBackFocused) FocusRing else GlassBorder,
-                                RoundedCornerShape(12.dp)
-                            )
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = if (isBackFocused) Color.Black else TextPrimary
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Settings",
                         color = TextPrimary,
@@ -285,7 +262,8 @@ fun SettingsScreen(
                             isMasked = true,
                             leadingIcon = {
                                 Icon(imageVector = Icons.Default.Storage, contentDescription = null, tint = PrimaryNeon, modifier = Modifier.size(16.dp))
-                            }
+                            },
+                            modifier = Modifier.focusRequester(backButtonFocusRequester)
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))

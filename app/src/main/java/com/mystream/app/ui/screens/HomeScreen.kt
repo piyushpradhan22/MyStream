@@ -977,30 +977,32 @@ private fun CategoryPill(
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
+    // Focused pill = solid bright accent with dark text (pops); selected = subtle tint; else faint glass.
     val bg = when {
-        isFocused -> FocusRing.copy(alpha = 0.25f)
+        isFocused -> FocusRing
         isSelected -> HotstarPillActiveBg
-        else -> HotstarPillInactiveBg
+        else -> Color(0x14FFFFFF)
     }
 
     val textColor = when {
-        isFocused -> TextPrimary
+        isFocused -> Color(0xFF06080E)
         isSelected -> HotstarPillActive
         else -> HotstarPillInactiveText
     }
 
     val border = when {
-        isFocused -> androidx.compose.foundation.BorderStroke(1.5.dp, FocusRing)
-        isSelected -> androidx.compose.foundation.BorderStroke(1.dp, HotstarPillActive.copy(alpha = 0.6f))
+        isFocused -> androidx.compose.foundation.BorderStroke(0.dp, Color.Transparent)
+        isSelected -> androidx.compose.foundation.BorderStroke(1.dp, HotstarPillActive.copy(alpha = 0.55f))
         else -> androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
     }
 
     Box(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .clip(RoundedCornerShape(16.dp))
+            .height(34.dp)
+            .clip(RoundedCornerShape(17.dp))
             .background(bg)
-            .border(border.width, border.brush, RoundedCornerShape(16.dp))
+            .border(border.width, border.brush, RoundedCornerShape(17.dp))
             .focusable(interactionSource = interactionSource)
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.type == KeyEventType.KeyDown) {
