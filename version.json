@@ -1,7 +1,7 @@
 {
-  "versionCode": 20,
-  "versionName": "1.1.2",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.1.2/app-universal-release.apk",
-  "changelog": "• ♾️ Continuous Infinite Scroll: Fixed home carousels that stopped loading after the first page — Popular Movies, HF Direct, and Indian/Top Rated now keep paging seamlessly as you scroll\n• 🎯 Smooth Focus & No Jumps: Removed the focus-shift and 'jump to start' glitch when new items loaded; your position stays put while more titles append at the end\n• 🚀 Earlier Prefetch: Rows now fetch the next page well before you reach the edge, so slower catalogs load in time for uninterrupted D-pad scrolling\n• 🛠️ Category-Switch Race Fix: Eliminated spurious reloads and premature 'end of catalog' detection when quickly switching between category rows"
+  "versionCode": 21,
+  "versionName": "1.2.0",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.2.0/app-universal-release.apk",
+  "changelog": "• 🎬 Native Trailer Playback: Background trailers now play through the native video engine instead of a WebView — smoother, lower memory use, and no more mismatched or stale trailers\n• ⚡ Faster & Smoother: Baseline profile plus targeted optimizations cut cold-start time and make home-screen scrolling noticeably smoother on low-end Android TV\n• 🏠 Smarter Home: Opens on Continue Watching (or Movies), the Movies/Series shortcuts map to your Indian catalog, and your scroll position, selection and paging are preserved when you return from a title\n• ▶️ Cleaner Player: Streamlined icon-only controls with the clock at the end, and no leftover frame from the previous video when starting a new stream\n• 🔎 Refreshed Design: New blended background across all pages, restyled search bar, uniform category tabs, and redundant back buttons removed (use the remote's Back)\n• 🐛 Fixes: Stream-card D-pad navigation, trailer now stops the moment playback starts, and no unwanted trailer autoplay when returning to the home grid"
 }
 
