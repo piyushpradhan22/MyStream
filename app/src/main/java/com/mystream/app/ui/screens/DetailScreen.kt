@@ -227,6 +227,7 @@ fun DetailScreen(
     }
 
     fun launchTorrentP2P(torrent: StremioStreamSource, fromBeginning: Boolean) {
+        TrailerPlaybackManager.stop() // Stop the background trailer when playback starts.
         val hash = torrent.infoHash ?: torrent.url?.substringAfter("btih:")?.substringBefore("&")
         if (!hash.isNullOrBlank()) {
             p2pRestartFromBeginning = fromBeginning
@@ -1965,6 +1966,7 @@ private fun launchResolvedStreamHelper(
     onEndResolving: () -> Unit,
     onPlay: (MediaPlaybackItem) -> Unit
 ) {
+    TrailerPlaybackManager.stop() // Stop the background trailer when playback starts.
     scope.launch {
         val savedPos = if (restartFromBeginning) 0L else repository.getSavedPosition(currentQueryId)
         val existingUrl = stream.url

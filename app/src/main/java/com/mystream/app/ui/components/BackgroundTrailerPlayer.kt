@@ -90,8 +90,10 @@ fun BackgroundTrailerPlayer(
     // Resolve the YouTube id to a direct stream and load it (graceful no-op on failure).
     LaunchedEffect(ytId) {
         isVideoReady = false
+        // Drop the previous trailer immediately so a stale video never shows under a newly focused item.
+        exoPlayer.stop()
+        exoPlayer.clearMediaItems()
         if (ytId.isBlank()) {
-            exoPlayer.stop()
             return@LaunchedEffect
         }
         val resolved = YouTubeTrailerResolver.resolve(ytId) ?: return@LaunchedEffect

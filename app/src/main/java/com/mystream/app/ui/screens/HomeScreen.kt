@@ -185,14 +185,15 @@ fun HomeScreen(
     val watchlist: List<WatchlistItem> by repository.watchlistFlow.collectAsState(initial = emptyList())
     val appSettings by repository.appSettingsFlow.collectAsState(initial = com.mystream.app.data.model.AppSettingsConfig())
 
-    var topMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var topSeries by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var hfCatalogItems by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var indianCategories by remember { mutableStateOf<List<Pair<String, List<StremioMetaPreview>>>>(emptyList()) }
-    var actionMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var scifiMovies by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var comedySeries by remember { mutableStateOf<List<StremioMetaPreview>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    val homeCache = remember { repository.homeCatalog }
+    var topMovies by remember { mutableStateOf(homeCache.topMovies) }
+    var topSeries by remember { mutableStateOf(homeCache.topSeries) }
+    var hfCatalogItems by remember { mutableStateOf(homeCache.hfCatalogItems) }
+    var indianCategories by remember { mutableStateOf(homeCache.indianCategories) }
+    var actionMovies by remember { mutableStateOf(homeCache.actionMovies) }
+    var scifiMovies by remember { mutableStateOf(homeCache.scifiMovies) }
+    var comedySeries by remember { mutableStateOf(homeCache.comedySeries) }
+    var isLoading by remember { mutableStateOf(!homeCache.loaded) }
 
     // Navigation & Category Selection State
     var selectedNavDestination by remember { mutableStateOf(OttNavDestination.HOME) }
@@ -248,8 +249,12 @@ fun HomeScreen(
         }
     }
 
-    // Fetch Catalogs in Parallel
+    // Fetch Catalogs in Parallel (skipped if already cached from a previous visit)
     LaunchedEffect(Unit) {
+        if (homeCache.loaded) {
+            isLoading = false
+            return@LaunchedEffect
+        }
         isLoading = true
         try {
             coroutineScope {
@@ -315,24 +320,32 @@ fun HomeScreen(
             }
         } finally {
             isLoading = false
+            homeCache.loaded = true
         }
     }
 
-    // Set initial focused item if continue watching is available
-    LaunchedEffect(continueWatchingList, topMovies) {
-        if (focusedItem == null) {
-            val firstRecord = continueWatchingList.firstOrNull()
-            if (firstRecord != null) {
-                focusedItem = StremioMetaPreview(
-                    id = firstRecord.imdbId,
-                    type = firstRecord.type,
-                    name = firstRecord.title,
-                    poster = firstRecord.posterUrl,
-                    genres = listOfNotNull(firstRecord.subtitle)
-                )
-                selectedCategoryId = "continue_watching"
-            } else if (topMovies.isNotEmpty()) {
-                focusedItem = topMovies.first()
+    // Persist loaded catalog lists to the app-scoped cache so they survive navigation.
+    LaunchedEffect(topMovies, topSeries, hfCatalogItems, indianCategories, actionMovies, scifiMovies, comedySeries) {
+        homeCache.topMovies = topMovies
+        homeCache.topSeries = topSeries
+        homeCache.hfCatalogItems = hfCatalogItems
+        homeCache.indianCategories = indianCategories
+        homeCache.actionMovies = actionMovies
+        homeCache.scifiMovies = scifiMovies
+        homeCache.comedySeries = comedySeries
+    }
+
+    // Initial category (once per app run): Continue Watching if items exist, else the Indian "Movies" category.
+    LaunchedEffect(continueWatchingList, indianCategories) {
+        if (homeCache.initialCategorySelected) return@LaunchedEffect
+        if (continueWatchingList.isNotEmpty()) {
+            selectedCategoryId = "continue_watching"
+            homeCache.initialCategorySelected = true
+        } else {
+            val moviesIdx = indianCategories.indexOfFirst { it.first.equals("Movies", ignoreCase = true) }
+            if (moviesIdx >= 0) {
+                selectedCategoryId = "indian_$moviesIdx"
+                homeCache.initialCategorySelected = true
             }
         }
     }
@@ -373,16 +386,13 @@ fun HomeScreen(
     LaunchedEffect(focusedItem?.id) {
         currentTrailerYtId = null
         val item = focusedItem ?: return@LaunchedEffect
+        // Skip trailer autoplay for the first card shown after returning from Detail; enrich metadata only.
+        val suppressAutoplay = homeCache.suppressNextAutoplay
+        if (suppressAutoplay) homeCache.suppressNextAutoplay = false
         // 900ms debounce ensures rapid D-pad scrolling is silky smooth
         delay(900)
         try {
             val meta = repository.fetchMetaDetail(item.type, item.id)
-            var trailerId = meta.effectiveTrailerYtId
-            if (trailerId.isNullOrBlank()) {
-                // Autoplay Hindi trailer fallback by default if official is unavailable
-                trailerId = repository.searchYouTubeTrailer(meta.name, meta.year, "Hindi")
-            }
-            currentTrailerYtId = trailerId
             focusedItem = focusedItem?.copy(
                 imdbRating = if (!meta.imdbRating.isNullOrBlank()) meta.imdbRating else focusedItem?.imdbRating,
                 year = meta.year ?: meta.releaseInfo ?: focusedItem?.year,
@@ -391,6 +401,14 @@ fun HomeScreen(
                 genres = if (meta.genres.isNotEmpty()) meta.genres else focusedItem?.genres ?: emptyList(),
                 background = meta.background ?: focusedItem?.background
             )
+            if (!suppressAutoplay) {
+                var trailerId = meta.effectiveTrailerYtId
+                if (trailerId.isNullOrBlank()) {
+                    // Autoplay Hindi trailer fallback by default if official is unavailable
+                    trailerId = repository.searchYouTubeTrailer(meta.name, meta.year, "Hindi")
+                }
+                currentTrailerYtId = trailerId
+            }
         } catch (e: Exception) {
             android.util.Log.d("HomeScreen", "Trailer not available for ${item.name}: ${e.message}")
         }
@@ -477,15 +495,32 @@ fun HomeScreen(
     // boundary focus advance) always observe freshly paginated items, not a stale capture.
     val currentItemsState = rememberUpdatedState(currentCategoryItems)
 
+    // On category switch, preview the FIRST card of the new category (hero + trailer) even before
+    // it is focused, so it never keeps showing the previously highlighted card. Handles async loads.
+    var previewedCategoryId by remember { mutableStateOf(selectedCategoryId) }
+    LaunchedEffect(selectedCategoryId, currentCategoryItems) {
+        if (selectedCategoryId != previewedCategoryId) {
+            val first = currentCategoryItems.firstOrNull()
+            if (first != null) {
+                previewedCategoryId = selectedCategoryId
+                focusedItem = first
+            }
+        }
+    }
+
     // Robust card focus helper: scrolls to card and requests focus with retry
     suspend fun focusCardAtIndex(index: Int) {
         if (currentCategoryItems.isEmpty()) return
         val targetIdx = index.coerceIn(0, (currentCategoryItems.size - 1).coerceAtLeast(0))
         focusedCardIndex = targetIdx
         currentCategoryItems.getOrNull(targetIdx)?.let { focusedItem = it }
-        try {
-            carouselListState.scrollToItem(targetIdx)
-        } catch (_: Exception) {}
+        // Only scroll if the target card isn't already on-screen, to avoid a jarring re-scroll.
+        val alreadyVisible = carouselListState.layoutInfo.visibleItemsInfo.any { it.index == targetIdx }
+        if (!alreadyVisible) {
+            try {
+                carouselListState.scrollToItem(targetIdx)
+            } catch (_: Exception) {}
+        }
         for (retry in 0..6) {
             delay(50)
             val fr = cardFocusRequesters[targetIdx]
@@ -528,7 +563,15 @@ fun HomeScreen(
         }
     }
 
-    val endOfCatalogReached = remember { mutableStateMapOf<String, Boolean>() }
+    val endOfCatalogReached = remember { mutableStateMapOf<String, Boolean>().apply { putAll(homeCache.endOfCatalogReached) } }
+
+    // Persist pagination end-flags to the cache so infinite-scroll state survives navigation.
+    LaunchedEffect(Unit) {
+        snapshotFlow { endOfCatalogReached.toMap() }.collect { m ->
+            homeCache.endOfCatalogReached.clear()
+            homeCache.endOfCatalogReached.putAll(m)
+        }
+    }
 
     // Resilient infinite scroll pagination using snapshotFlow (prevents D-pad scroll cancellation)
     LaunchedEffect(selectedCategoryId) {
@@ -651,12 +694,12 @@ fun HomeScreen(
                     OttNavDestination.SETTINGS -> onNavigateToSources()
                     OttNavDestination.CUSTOM_URL -> showCustomUrlDialog = true
                     OttNavDestination.MOVIES -> {
-                        selectedCategoryId = "trending"
-                        if (topMovies.isNotEmpty()) focusedItem = topMovies.first()
+                        // Map to the Indian catalog's "Movies" category (not cinemeta). Preview effect focuses its first card.
+                        selectedCategoryId = categories.firstOrNull { it.title.equals("Movies", ignoreCase = true) }?.id ?: "trending"
                     }
                     OttNavDestination.SERIES -> {
-                        selectedCategoryId = "series"
-                        if (topSeries.isNotEmpty()) focusedItem = topSeries.first()
+                        // Map to the Indian catalog's "Series" category (not cinemeta).
+                        selectedCategoryId = categories.firstOrNull { it.title.equals("Series", ignoreCase = true) }?.id ?: "series"
                     }
                     OttNavDestination.WATCHLIST -> {
                         selectedCategoryId = "watchlist"
@@ -737,12 +780,8 @@ fun HomeScreen(
                     }
                 },
                 onNavigateDownToContent = {
-                    val targetFR = cardFocusRequesters[focusedCardIndex] ?: cardFocusRequesters[0]
-                    if (targetFR != null) {
-                        try { targetFR.requestFocus() } catch (_: Exception) { focusManager.moveFocus(FocusDirection.Down) }
-                    } else {
-                        focusManager.moveFocus(FocusDirection.Down)
-                    }
+                    // Return focus to the current carousel card (robust scroll+retry), never the sidebar.
+                    scope.launch { focusCardAtIndex(focusedCardIndex) }
                 },
                 onNavigateLeftToSidebar = {
                     try { searchFocusRequester.requestFocus() } catch (_: Exception) {}
@@ -850,6 +889,7 @@ fun HomeScreen(
                                         },
                                     onClick = {
                                         focusedItem = meta
+                                        homeCache.suppressNextAutoplay = true
                                         onNavigateToDetail(meta.type, meta.id)
                                     }
                                 )
@@ -892,11 +932,8 @@ fun HomeScreen(
                             isSelected = isSelected,
                             focusRequester = pillFR,
                             onClick = {
+                                // Switch category; the preview effect updates hero/trailer to its first card.
                                 selectedCategoryId = category.id
-                                val firstItem = currentCategoryItems.firstOrNull()
-                                if (firstItem != null) {
-                                    focusedItem = firstItem
-                                }
                             },
                             onNavigateDown = {
                                 // Already at bottom edge

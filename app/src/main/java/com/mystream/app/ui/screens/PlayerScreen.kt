@@ -552,7 +552,7 @@ fun PlayerScreen(
                 true
             }
             Key.DirectionRight -> {
-                lockFocusRequester.safeRequestFocus()
+                // External is the last control now; keep focus here.
                 true
             }
             Key.DirectionUp -> {
@@ -564,21 +564,6 @@ fun PlayerScreen(
             Key.NumPadEnter -> {
                 playerManager.pause()
                 com.mystream.app.ui.utils.ExternalPlayerHelper.launchExternalPlayer(context, item, playerManager.currentPosition.value)
-                true
-            }
-            else -> false
-        }
-    }
-
-    fun handleLockNav(event: KeyEvent): Boolean {
-        if (event.type != KeyEventType.KeyDown) return false
-        return when (event.key) {
-            Key.DirectionLeft -> {
-                externalPlayerFocusRequester.safeRequestFocus()
-                true
-            }
-            Key.DirectionUp -> {
-                seekbarFocusRequester.safeRequestFocus()
                 true
             }
             else -> false
@@ -1020,32 +1005,6 @@ fun PlayerScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Current Wall-Clock Time Pill (e.g. 8:35 PM)
-                        var currentClockTime by remember { mutableStateOf("") }
-                        LaunchedEffect(showControls) {
-                            while (showControls) {
-                                currentClockTime = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date())
-                                kotlinx.coroutines.delay(1000)
-                            }
-                        }
-                        if (currentClockTime.isNotBlank()) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(Color(0x4D000000))
-                                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp))
-                                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = currentClockTime,
-                                    color = Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
                         if (onEnterPiP != null) {
                             Box(
                                 modifier = Modifier
@@ -1287,15 +1246,9 @@ fun PlayerScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Audiotrack,
-                                contentDescription = null,
+                                contentDescription = "Audio",
                                 tint = if (audioFocused) FocusRingOrange else PrimaryNeon,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "Audio",
-                                color = if (audioFocused) FocusRingOrange else TextPrimary,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
@@ -1319,15 +1272,9 @@ fun PlayerScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Subtitles,
-                                contentDescription = null,
+                                contentDescription = "Subtitles",
                                 tint = if (subtitleFocused) FocusRingOrange else if (isSubtitleEnabled) SecondaryCyan else TextSecondary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = if (isSubtitleEnabled) "CC On" else "Subtitles",
-                                color = if (subtitleFocused) FocusRingOrange else TextPrimary,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
@@ -1351,15 +1298,9 @@ fun PlayerScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.AspectRatio,
-                                contentDescription = null,
+                                contentDescription = "Aspect ratio",
                                 tint = if (aspectFocused) FocusRingOrange else AccentAmber,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = aspectRatio.label.substringBefore(" ("),
-                                color = if (aspectFocused) FocusRingOrange else TextPrimary,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
@@ -1383,15 +1324,9 @@ fun PlayerScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Speed,
-                                contentDescription = null,
+                                contentDescription = "Playback speed",
                                 tint = if (speedFocused) FocusRingOrange else EmeraldNeon,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "${playbackSpeed}x",
-                                color = if (speedFocused) FocusRingOrange else TextPrimary,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
@@ -1420,52 +1355,11 @@ fun PlayerScreen(
                                 imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                                 contentDescription = "External Player",
                                 tint = if (externalPlayerFocused) FocusRingOrange else SecondaryCyan,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "External",
-                                color = if (externalPlayerFocused) FocusRingOrange else TextPrimary,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
-                        // 6. Lock Controls Pill
-                        Row(
-                            modifier = Modifier
-                                .focusRequester(lockFocusRequester)
-                                .focusable(interactionSource = lockInteraction)
-                                .onPreviewKeyEvent(::handleLockNav)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(if (lockFocused) FocusRingOrange.copy(alpha = 0.35f) else Color(0x4D000000))
-                                .border(
-                                    if (lockFocused) 2.dp else 1.dp,
-                                    if (lockFocused) FocusRingOrange else Color(0x33FFFFFF),
-                                    RoundedCornerShape(20.dp)
-                                )
-                                .clickable(interactionSource = lockInteraction, indication = null) {
-                                    isControlsLocked = true
-                                    showControls = false
-                                }
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.LockOpen,
-                                contentDescription = null,
-                                tint = if (lockFocused) FocusRingOrange else TextSecondary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "Lock",
-                                color = if (lockFocused) FocusRingOrange else TextPrimary,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        // 7. Live Download Speed Info Pill (Always shown after Lock)
+                        // Live Download Speed Info Pill
                         val currentSpeedText = if (downloadSpeed.isNotBlank() && downloadSpeed != "0 KB/s") downloadSpeed else "Online"
                         Row(
                             modifier = Modifier
@@ -1488,6 +1382,32 @@ fun PlayerScreen(
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+
+                        // System wall-clock time (moved from top-right), placed last in the row.
+                        var currentClockTime by remember { mutableStateOf("") }
+                        LaunchedEffect(showControls) {
+                            while (showControls) {
+                                currentClockTime = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date())
+                                kotlinx.coroutines.delay(1000)
+                            }
+                        }
+                        if (currentClockTime.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color(0x4D000000))
+                                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp))
+                                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = currentClockTime,
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }

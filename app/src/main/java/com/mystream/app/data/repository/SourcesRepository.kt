@@ -47,12 +47,36 @@ data class StreamLoadState(
     val isLoading: Boolean = false
 )
 
+/**
+ * Home-screen catalog state held at repository (app) scope so it survives Compose Navigation
+ * disposing the HomeScreen composition. Without this, returning from Detail reloads only the
+ * first page and loses scroll position / pagination.
+ */
+class HomeCatalogState {
+    var loaded: Boolean = false
+    var topMovies: List<StremioMetaPreview> = emptyList()
+    var topSeries: List<StremioMetaPreview> = emptyList()
+    var hfCatalogItems: List<StremioMetaPreview> = emptyList()
+    var indianCategories: List<Pair<String, List<StremioMetaPreview>>> = emptyList()
+    var actionMovies: List<StremioMetaPreview> = emptyList()
+    var scifiMovies: List<StremioMetaPreview> = emptyList()
+    var comedySeries: List<StremioMetaPreview> = emptyList()
+    val endOfCatalogReached: MutableMap<String, Boolean> = mutableMapOf()
+    // When true, the next hero trailer autoplay is skipped (set when leaving to Detail).
+    var suppressNextAutoplay: Boolean = false
+    // Whether the one-time initial category (Continue Watching / Movies) has been chosen.
+    var initialCategorySelected: Boolean = false
+}
+
 class SourcesRepository(
     private val context: Context,
     private val apiClient: StremioApiClient = StremioApiClient(cacheDir = context.cacheDir),
     val pikpakResolver: PikPakStreamResolver = PikPakStreamResolver(context)
 ) {
     var bootFeaturedPool: List<StremioMetaPreview>? = null
+
+    // Survives HomeScreen navigation (see HomeCatalogState).
+    val homeCatalog = HomeCatalogState()
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
