@@ -57,6 +57,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -465,6 +466,10 @@ fun HomeScreen(
         focusedItem?.let { item -> watchlist.any { it.imdbId == item.id } } ?: false
     }
 
+    // Live snapshot of the current row's items so background coroutines (e.g. D-pad
+    // boundary focus advance) always observe freshly paginated items, not a stale capture.
+    val currentItemsState = rememberUpdatedState(currentCategoryItems)
+
     // Robust card focus helper: scrolls to card and requests focus with retry
     suspend fun focusCardAtIndex(index: Int) {
         if (currentCategoryItems.isEmpty()) return
@@ -520,39 +525,44 @@ fun HomeScreen(
 
     // Resilient infinite scroll pagination using snapshotFlow (prevents D-pad scroll cancellation)
     LaunchedEffect(selectedCategoryId) {
+        val activeCategoryId = selectedCategoryId
         snapshotFlow {
-            val cat = categories.find { it.id == selectedCategoryId }
-            val items = currentCategoryItems
-            val threshold = (items.size - 6).coerceAtLeast(0)
-            val nearEnd = items.size >= 10 && (
-                focusedCardIndex >= threshold || 
-                carouselListState.firstVisibleItemIndex >= (threshold - 2).coerceAtLeast(0)
-            )
-            Triple(nearEnd, cat, items.size)
+            // Read the live list (currentItemsState), not the captured `currentCategoryItems`,
+            // otherwise items.size stays frozen at capture time and paging stops after one page.
+            val items = currentItemsState.value
+            val lastVisible = carouselListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            // Prefetch well before the end so slow sources (HF/Indian) load in time for smooth continuity.
+            val threshold = (items.size - 12).coerceAtLeast(0)
+            val nearEnd = items.size >= 8 && (focusedCardIndex >= threshold || lastVisible >= threshold)
+            nearEnd to items.size
         }
         .distinctUntilChanged()
-        .collect { (nearEnd, cat, currentSize) ->
-            if (nearEnd && cat != null && 
-                cat.id != "continue_watching" && cat.id != "watchlist" && 
-                !isLoadingMoreCategoryItems && 
+        .collect { (nearEnd, snapshotSize) ->
+            // Only page the category this effect was launched for; ignore transient state during a switch.
+            if (selectedCategoryId != activeCategoryId) return@collect
+            val cat = categories.find { it.id == activeCategoryId }
+            if (nearEnd && cat != null &&
+                cat.id != "continue_watching" && cat.id != "watchlist" &&
+                !isLoadingMoreCategoryItems &&
                 endOfCatalogReached[cat.id] != true
             ) {
                 isLoadingMoreCategoryItems = true
                 try {
-                    val nextSkip = currentSize
-                    android.util.Log.d("HomeScreen", "Pagination triggering for ${cat.id} at skip=$nextSkip, currentCount=$currentSize")
                     if (cat.id.startsWith("indian_")) {
                         val idx = cat.id.substringAfter("indian_").toIntOrNull() ?: 0
-                        val catTitle = indianCategories.getOrNull(idx)?.first
-                        if (catTitle != null) {
-                            val res = repository.fetchIndianCatalog(category = catTitle, skip = nextSkip, limit = 20)
+                        val entry = indianCategories.getOrNull(idx)
+                        if (entry != null) {
+                            val (cName, existing) = entry
+                            // Skip is derived from the live list size to guarantee contiguous, gapless paging.
+                            val nextSkip = existing.size
+                            android.util.Log.d("HomeScreen", "Pagination triggering for ${cat.id} at skip=$nextSkip")
+                            val res = repository.fetchIndianCatalog(category = cName, skip = nextSkip, limit = 20)
                             if (res.metas.isNotEmpty()) {
-                                val updated = indianCategories.toMutableList()
-                                val (cName, existing) = updated[idx]
                                 val newItems = (existing + res.metas).distinctBy { it.id }
                                 if (newItems.size == existing.size) {
                                     endOfCatalogReached[cat.id] = true
                                 } else {
+                                    val updated = indianCategories.toMutableList()
                                     updated[idx] = cName to newItems
                                     indianCategories = updated
                                 }
@@ -561,11 +571,12 @@ fun HomeScreen(
                             }
                         }
                     } else if (cat.id == "hf_direct") {
+                        val nextSkip = hfCatalogItems.size
+                        android.util.Log.d("HomeScreen", "Pagination triggering for ${cat.id} at skip=$nextSkip")
                         val res = repository.fetchHfCatalog(skip = nextSkip, limit = 30)
                         if (res.metas.isNotEmpty()) {
-                            val beforeSize = hfCatalogItems.size
                             val newItems = (hfCatalogItems + res.metas).distinctBy { it.id }
-                            if (newItems.size == beforeSize) {
+                            if (newItems.size == hfCatalogItems.size) {
                                 endOfCatalogReached[cat.id] = true
                             } else {
                                 hfCatalogItems = newItems
@@ -574,6 +585,16 @@ fun HomeScreen(
                             endOfCatalogReached[cat.id] = true
                         }
                     } else {
+                        val currentList = when (cat.id) {
+                            "trending" -> topMovies
+                            "series" -> topSeries
+                            "action" -> actionMovies
+                            "scifi" -> scifiMovies
+                            "comedy" -> comedySeries
+                            else -> return@collect
+                        }
+                        val nextSkip = currentList.size
+                        android.util.Log.d("HomeScreen", "Pagination triggering for ${cat.id} at skip=$nextSkip")
                         val res = repository.fetchCatalog(
                             type = cat.type,
                             catalogId = cat.catalogId,
@@ -581,36 +602,16 @@ fun HomeScreen(
                             skip = nextSkip
                         )
                         if (res.metas.isNotEmpty()) {
-                            when (selectedCategoryId) {
-                                "trending" -> {
-                                    val beforeSize = topMovies.size
-                                    val newItems = (topMovies + res.metas).distinctBy { it.id }
-                                    if (newItems.size == beforeSize) endOfCatalogReached[cat.id] = true
-                                    else topMovies = newItems
-                                }
-                                "series" -> {
-                                    val beforeSize = topSeries.size
-                                    val newItems = (topSeries + res.metas).distinctBy { it.id }
-                                    if (newItems.size == beforeSize) endOfCatalogReached[cat.id] = true
-                                    else topSeries = newItems
-                                }
-                                "action" -> {
-                                    val beforeSize = actionMovies.size
-                                    val newItems = (actionMovies + res.metas).distinctBy { it.id }
-                                    if (newItems.size == beforeSize) endOfCatalogReached[cat.id] = true
-                                    else actionMovies = newItems
-                                }
-                                "scifi" -> {
-                                    val beforeSize = scifiMovies.size
-                                    val newItems = (scifiMovies + res.metas).distinctBy { it.id }
-                                    if (newItems.size == beforeSize) endOfCatalogReached[cat.id] = true
-                                    else scifiMovies = newItems
-                                }
-                                "comedy" -> {
-                                    val beforeSize = comedySeries.size
-                                    val newItems = (comedySeries + res.metas).distinctBy { it.id }
-                                    if (newItems.size == beforeSize) endOfCatalogReached[cat.id] = true
-                                    else comedySeries = newItems
+                            val newItems = (currentList + res.metas).distinctBy { it.id }
+                            if (newItems.size == currentList.size) {
+                                endOfCatalogReached[cat.id] = true
+                            } else {
+                                when (cat.id) {
+                                    "trending" -> topMovies = newItems
+                                    "series" -> topSeries = newItems
+                                    "action" -> actionMovies = newItems
+                                    "scifi" -> scifiMovies = newItems
+                                    "comedy" -> comedySeries = newItems
                                 }
                             }
                         } else {
@@ -619,7 +620,7 @@ fun HomeScreen(
                     }
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
-                    android.util.Log.e("HomeScreen", "Pagination error for $selectedCategoryId", e)
+                    android.util.Log.e("HomeScreen", "Pagination error for $activeCategoryId", e)
                 } finally {
                     isLoadingMoreCategoryItems = false
                 }

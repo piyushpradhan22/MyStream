@@ -1,6 +1,7 @@
 {
-  "versionCode": 19,
-  "versionName": "1.1.1",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.1.1/app-universal-release.apk",
-  "changelog": "• 🧹 Storage Hygiene & Auto-Purge: Automatically deletes P2P torrent cache files on stream exit and app startup, preventing multi-gigabyte disk leaks\n• 💾 Cache Ceiling & Low-Storage Guard: Reduced media cache cap to 200 MB and added auto-trim protection when device disk space drops below 500 MB\n• ⚙️ In-App Storage Manager: New 'Device Storage & App Cache' section in Settings displaying real-time app cache and free space with a 'Clear Cache Now' button\n• 📜 Infinite Scroll Fix: Resolved infinite horizontal scroll pagination issues for HF Direct and Movies category rows\n• 📦 Updater Permission Fix: Handled Unknown App Sources permission prompt and URI permissions for seamless in-app APK installation\n• 🎬 130% Home Trailer Zoom: Centered 130% zoom on the home screen spotlight video for a borderless, cinematic appearance"
+  "versionCode": 20,
+  "versionName": "1.1.2",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.1.2/app-universal-release.apk",
+  "changelog": "• ♾️ Continuous Infinite Scroll: Fixed home carousels that stopped loading after the first page — Popular Movies, HF Direct, and Indian/Top Rated now keep paging seamlessly as you scroll\n• 🎯 Smooth Focus & No Jumps: Removed the focus-shift and 'jump to start' glitch when new items loaded; your position stays put while more titles append at the end\n• 🚀 Earlier Prefetch: Rows now fetch the next page well before you reach the edge, so slower catalogs load in time for uninterrupted D-pad scrolling\n• 🛠️ Category-Switch Race Fix: Eliminated spurious reloads and premature 'end of catalog' detection when quickly switching between category rows"
 }
+
