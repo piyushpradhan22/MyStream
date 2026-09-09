@@ -290,7 +290,7 @@ fun DetailScreen(
         isSearchingCustomTrailer = false
         if (playCustomTrailerWhenReady && !ytId.isNullOrBlank()) {
             userSelectedTrailerYtId = ytId
-            TrailerPlaybackManager.restartOrLoad(ytId, appSettings.trailerAudioMuted)
+            TrailerPlaybackManager.restartOrLoad(ytId, appSettings.trailerAudioMuted, mediaId = id)
             isDetailTrailerReady = true
             playCustomTrailerWhenReady = false
         }
@@ -389,10 +389,19 @@ fun DetailScreen(
     LaunchedEffect(activeBackgroundTrailerYtId, TrailerPlaybackManager.isPlaybackEnabled, appSettings.trailerAudioMuted) {
         // Preserve pause state across navigation and never carry over the previous title's trailer:
         // stop unless playback is enabled AND this title's own trailer id is resolved.
-        if (!TrailerPlaybackManager.isPlaybackEnabled || activeBackgroundTrailerYtId.isNullOrBlank()) {
+        if (!TrailerPlaybackManager.isPlaybackEnabled) {
             TrailerPlaybackManager.stop()
+        } else if (activeBackgroundTrailerYtId.isNullOrBlank()) {
+            // Trailer id not resolved yet. If the trailer already running belongs to this very title
+            // (handed over from the home hero), let it keep playing so the transition is seamless.
+            if (TrailerPlaybackManager.activeTrailerMediaId != id) TrailerPlaybackManager.stop()
         } else {
-            TrailerPlaybackManager.play(activeBackgroundTrailerYtId, appSettings.trailerAudioMuted, forceReplay = false)
+            TrailerPlaybackManager.play(
+                activeBackgroundTrailerYtId,
+                appSettings.trailerAudioMuted,
+                forceReplay = false,
+                mediaId = id
+            )
         }
     }
 
@@ -523,7 +532,7 @@ fun DetailScreen(
                     preferredLanguage = appSettings.preferredAudioLanguage,
                     onPlayTrailer = { ytId: String, _: String ->
                         userSelectedTrailerYtId = ytId
-                        TrailerPlaybackManager.restartOrLoad(ytId, appSettings.trailerAudioMuted)
+                        TrailerPlaybackManager.restartOrLoad(ytId, appSettings.trailerAudioMuted, mediaId = id)
                         isDetailTrailerReady = true
                     },
                     onPlayCustomTrailerWhenReady = {
@@ -537,7 +546,7 @@ fun DetailScreen(
                             if (!ytId.isNullOrBlank()) {
                                 customTrailerYtId = ytId
                                 userSelectedTrailerYtId = ytId
-                                TrailerPlaybackManager.restartOrLoad(ytId, appSettings.trailerAudioMuted)
+                                TrailerPlaybackManager.restartOrLoad(ytId, appSettings.trailerAudioMuted, mediaId = id)
                                 isDetailTrailerReady = true
                             } else {
                                 Toast.makeText(context, "Hindi trailer not found", Toast.LENGTH_SHORT).show()

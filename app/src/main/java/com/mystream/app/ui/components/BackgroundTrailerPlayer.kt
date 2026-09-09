@@ -50,6 +50,8 @@ fun BackgroundTrailerPlayer(
 ) {
     val context = LocalContext.current
     var isVideoReady by remember { mutableStateOf(false) }
+    // Survives pauses so a resume can re-show the video without waiting for another first frame.
+    var hasRenderedFrame by remember { mutableStateOf(false) }
 
     val dataSourceFactory = remember {
         DefaultDataSource.Factory(
@@ -70,11 +72,13 @@ fun BackgroundTrailerPlayer(
     DisposableEffect(Unit) {
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() {
+                hasRenderedFrame = true
                 isVideoReady = true
                 onPlaybackStarted?.invoke()
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
+                    hasRenderedFrame = false
                     isVideoReady = false
                     onVideoEnded?.invoke()
                 }
@@ -90,6 +94,7 @@ fun BackgroundTrailerPlayer(
     // Resolve the YouTube id to a direct stream and load it (graceful no-op on failure).
     LaunchedEffect(ytId) {
         isVideoReady = false
+        hasRenderedFrame = false
         // Drop the previous trailer immediately so a stale video never shows under a newly focused item.
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
@@ -114,7 +119,12 @@ fun BackgroundTrailerPlayer(
     LaunchedEffect(isAudioMuted) { exoPlayer.volume = if (isAudioMuted) 0f else 1f }
     LaunchedEffect(isStopped) {
         exoPlayer.playWhenReady = !isStopped
-        if (isStopped) isVideoReady = false
+        if (isStopped) {
+            isVideoReady = false
+        } else if (hasRenderedFrame) {
+            isVideoReady = true
+            onPlaybackStarted?.invoke()
+        }
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Transparent)) {

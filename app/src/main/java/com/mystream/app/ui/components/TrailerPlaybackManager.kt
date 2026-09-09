@@ -12,6 +12,10 @@ object TrailerPlaybackManager {
     var activeTrailerYtId by mutableStateOf<String?>(null)
         private set
 
+    /** Imdb/meta id of the title the active trailer belongs to, so screens can hand it over seamlessly. */
+    var activeTrailerMediaId by mutableStateOf<String?>(null)
+        private set
+
     var isAudioMuted by mutableStateOf(false)
         private set
 
@@ -29,16 +33,18 @@ object TrailerPlaybackManager {
     // Direct listener to dispatch commands to the persistent WebView player without destruction
     var playerCommandListener: ((command: String, arg: String?) -> Unit)? = null
 
-    fun play(ytId: String, muted: Boolean = isAudioMuted, forceReplay: Boolean = false) {
+    fun play(ytId: String, muted: Boolean = isAudioMuted, forceReplay: Boolean = false, mediaId: String? = null) {
         if (ytId.isBlank()) return
         isStopped = false
         isAudioMuted = muted
         isPlaybackEnabled = true
+        if (mediaId != null) activeTrailerMediaId = mediaId
         if (activeTrailerYtId == ytId && !forceReplay) {
             playerCommandListener?.invoke("RESUME", null)
             return
         }
         activeTrailerYtId = ytId
+        isVideoPlaying = false
         if (forceReplay) {
             playerCommandListener?.invoke("LOAD_OR_REPLAY", ytId)
         } else {
@@ -46,8 +52,8 @@ object TrailerPlaybackManager {
         }
     }
 
-    fun restartOrLoad(ytId: String, muted: Boolean = isAudioMuted) {
-        play(ytId, muted = muted, forceReplay = true)
+    fun restartOrLoad(ytId: String, muted: Boolean = isAudioMuted, mediaId: String? = null) {
+        play(ytId, muted = muted, forceReplay = true, mediaId = mediaId)
     }
 
     fun stop() {
@@ -94,6 +100,7 @@ object TrailerPlaybackManager {
 
     fun release() {
         activeTrailerYtId = null
+        activeTrailerMediaId = null
         stop()
     }
 }

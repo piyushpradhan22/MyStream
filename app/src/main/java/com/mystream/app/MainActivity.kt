@@ -135,10 +135,11 @@ class MainActivity : ComponentActivity() {
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
-            // Shared Root Background Trailer Player (Active for HomeScreen & DetailScreen)
+            // Shared Root Background Trailer Player (Active for HomeScreen & DetailScreen).
+            // Deliberately NOT gated on isStopped: a pause must keep the ExoPlayer alive so home ->
+            // detail (and play/pause) resumes the very same video instead of reloading it.
             if (TrailerPlaybackManager.isTrailerLayerVisible &&
                 TrailerPlaybackManager.isPlaybackEnabled &&
-                !TrailerPlaybackManager.isStopped &&
                 !TrailerPlaybackManager.activeTrailerYtId.isNullOrBlank()
             ) {
                 val isHomeScreen = currentRoute == "home"

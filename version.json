@@ -1,7 +1,7 @@
 {
-  "versionCode": 24,
-  "versionName": "1.3.2",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.3.2/app-universal-release.apk",
-  "changelog": "• 🐛 Fixed Android TV black screen during magnet playback by using a TextureView-backed main player on affected TV hardware\n• 🧲 Improved P2P playback routing: localhost torrent streams now go directly to ExoPlayer instead of being wrapped by the extra CDN proxy\n• 🎬 Sharper background trailers: YouTube trailer selection now prefers 720p when available, then falls back to 480p/360p\n• ✅ Based on 1.3.1: Android TV home recommendations, media action routing, native trailers, and playback stability fixes"
+  "versionCode": 25,
+  "versionName": "1.3.3",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.3.3/app-universal-release.apk",
+  "changelog": "• 🎬 Seamless trailer handoff: opening a title from the home screen now keeps the same trailer playing and just scales it to full screen instead of restarting it\n• ⏯️ Pausing a trailer no longer tears down the player — resume continues from where it left off\n• 🧠 Trailers are now tracked per title, so the detail screen never stops a trailer that already belongs to the title being opened\n• ✅ Based on 1.3.2: TextureView main player for Android TV black-screen fix, direct P2P stream routing, and sharper 720p trailer selection"
 }
 

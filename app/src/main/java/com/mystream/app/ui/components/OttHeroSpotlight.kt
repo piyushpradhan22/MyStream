@@ -94,9 +94,9 @@ fun OttHeroSpotlight(
     modifier: Modifier = Modifier,
     watchlistFocusRequester: FocusRequester? = null
 ) {
-    LaunchedEffect(trailerYtId, isTrailerPlaybackEnabled, isAudioMuted) {
+    LaunchedEffect(trailerYtId, isTrailerPlaybackEnabled, isAudioMuted, item?.id) {
         if (!trailerYtId.isNullOrBlank() && isTrailerPlaybackEnabled) {
-            TrailerPlaybackManager.play(trailerYtId, isAudioMuted)
+            TrailerPlaybackManager.play(trailerYtId, isAudioMuted, mediaId = item?.id)
         } else {
             TrailerPlaybackManager.stop()
         }
