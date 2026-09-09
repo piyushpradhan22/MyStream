@@ -27,6 +27,13 @@ object YouTubeTrailerResolver {
 
     private data class CacheEntry(val trailer: ResolvedTrailer, val expiresAt: Long)
 
+    private data class TrailerVideoCandidate(
+        val videoUrl: String,
+        val audioUrl: String?,
+        val resolution: String?,
+        val isMuxed: Boolean
+    )
+
     private val cache = object : java.util.LinkedHashMap<String, CacheEntry>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CacheEntry>?): Boolean = size > 48
     }
@@ -48,25 +55,31 @@ object YouTubeTrailerResolver {
                 val extractor = ServiceList.YouTube.getStreamExtractor("https://www.youtube.com/watch?v=$ytId")
                 extractor.fetchPage()
 
-                // Prefer a muxed progressive stream (single URL, lowest decode cost on weak TV).
-                val muxed = extractor.videoStreams
+                val bestAudio = extractor.audioStreams
                     .filter { !it.url.isNullOrBlank() }
-                    .minByOrNull { resolutionRank(it.resolution) }
+                    .maxByOrNull { it.averageBitrate }
 
-                val resolved = if (muxed != null) {
-                    ResolvedTrailer(videoUrl = muxed.url!!)
-                } else {
-                    // Fall back to separate adaptive video + audio tracks to be merged by the player.
-                    val video = extractor.videoOnlyStreams
+                val candidates = buildList {
+                    extractor.videoStreams
                         .filter { !it.url.isNullOrBlank() }
-                        .minByOrNull { resolutionRank(it.resolution) }
-                    val audio = extractor.audioStreams
-                        .filter { !it.url.isNullOrBlank() }
-                        .maxByOrNull { it.averageBitrate }
-                    if (video != null && audio != null) {
-                        ResolvedTrailer(videoUrl = video.url!!, audioUrl = audio.url)
-                    } else null
+                        .forEach { stream ->
+                            add(TrailerVideoCandidate(stream.url!!, null, stream.resolution, isMuxed = true))
+                        }
+                    if (bestAudio != null) {
+                        extractor.videoOnlyStreams
+                            .filter { !it.url.isNullOrBlank() }
+                            .forEach { stream ->
+                                add(TrailerVideoCandidate(stream.url!!, bestAudio.url, stream.resolution, isMuxed = false))
+                            }
+                    }
                 }
+
+                val selected = candidates.minWithOrNull(
+                    compareBy<TrailerVideoCandidate> { resolutionRank(it.resolution) }
+                        .thenBy { if (it.isMuxed) 0 else 1 }
+                )
+
+                val resolved = selected?.let { ResolvedTrailer(videoUrl = it.videoUrl, audioUrl = it.audioUrl) }
 
                 if (resolved != null) {
                     synchronized(cache) {
@@ -81,9 +94,11 @@ object YouTubeTrailerResolver {
         }
     }
 
-    // Lower rank = preferred. Targets ~360-480p: smooth on weak TV, low bandwidth for a background trailer.
+    // Lower rank = preferred. Target 720p for sharper TV backgrounds, then fall back to 480p/360p.
     private fun resolutionRank(resolution: String?): Int {
         val height = resolution?.substringBefore('p')?.trim()?.toIntOrNull() ?: return Int.MAX_VALUE
-        return kotlin.math.abs(height - 420)
+        val preferredHeights = listOf(720, 480, 360, 1080, 240)
+        val nearestPreferredIndex = preferredHeights.indices.minBy { kotlin.math.abs(preferredHeights[it] - height) }
+        return nearestPreferredIndex * 10_000 + kotlin.math.abs(preferredHeights[nearestPreferredIndex] - height)
     }
 }

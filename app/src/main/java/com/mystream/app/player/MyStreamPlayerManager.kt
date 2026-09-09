@@ -577,13 +577,18 @@ class MyStreamPlayerManager(
         scope.launch {
             val directUrl = resolveFinalStreamUrl(item.mediaUrl)
             _currentItem.value = item.copy(mediaUrl = directUrl)
-            val streamUrl = if (directUrl.startsWith("http", ignoreCase = true)) {
+            val streamUrl = if (directUrl.startsWith("http", ignoreCase = true) && !isLocalhostUrl(directUrl)) {
                 streamProxyServer.getProxyUrl(directUrl)
             } else {
                 directUrl
             }
             startPlaybackInternal(item, streamUrl, actualStartPos)
         }
+    }
+
+    private fun isLocalhostUrl(url: String): Boolean {
+        val host = runCatching { Uri.parse(url).host }.getOrNull()?.lowercase(Locale.US) ?: return false
+        return host == "127.0.0.1" || host == "localhost" || host == "::1"
     }
 
     private fun startPlaybackInternal(item: MediaPlaybackItem, playUrl: String, actualStartPos: Long) {

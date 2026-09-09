@@ -9,6 +9,7 @@ import android.app.Activity
 import com.mystream.app.ui.utils.safeRequestFocus
 import android.content.Context
 import android.media.AudioManager
+import android.view.LayoutInflater
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -104,6 +105,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
+import com.mystream.app.R
 import com.mystream.app.data.model.MediaPlaybackItem
 import com.mystream.app.player.MyStreamPlayerManager
 import com.mystream.app.ui.components.AspectRatioDialog
@@ -742,7 +744,7 @@ fun PlayerScreen(
         // ExoPlayer View
         AndroidView(
             factory = { ctx ->
-                PlayerView(ctx).apply {
+                (LayoutInflater.from(ctx).inflate(R.layout.view_main_player, null) as PlayerView).apply {
                     this.player = playerManager.player
                     useController = false // We use our sleek Compose HUD controls
                     setKeepContentOnPlayerReset(false) // Don't hold the previous video's last frame

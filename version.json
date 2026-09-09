@@ -1,7 +1,7 @@
 {
-  "versionCode": 23,
-  "versionName": "1.3.1",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.3.1/app-universal-release.apk",
-  "changelog": "• 📺 Added Android TV home screen recommendations: MyStream now publishes a trending channel row for supported TV launchers\n• 🔎 Added media action routing: Android TV / Assistant play and watch requests can deep link into MyStream search\n• 🏠 Reuses the existing MyStream recommendations channel across launches to avoid duplicate home screen rows\n• ✅ Based on 1.3.0: black-screen back navigation fix, correct detail trailers, reliable hero-to-row focus, native trailers, and performance improvements"
+  "versionCode": 24,
+  "versionName": "1.3.2",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.3.2/app-universal-release.apk",
+  "changelog": "• 🐛 Fixed Android TV black screen during magnet playback by using a TextureView-backed main player on affected TV hardware\n• 🧲 Improved P2P playback routing: localhost torrent streams now go directly to ExoPlayer instead of being wrapped by the extra CDN proxy\n• 🎬 Sharper background trailers: YouTube trailer selection now prefers 720p when available, then falls back to 480p/360p\n• ✅ Based on 1.3.1: Android TV home recommendations, media action routing, native trailers, and playback stability fixes"
 }
 
