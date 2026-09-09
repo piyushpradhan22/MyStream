@@ -11,6 +11,7 @@ import coil3.request.crossfade
 import com.mystream.app.data.api.SystemFallbackDns
 import com.mystream.app.data.repository.SourcesRepository
 import com.mystream.app.player.MyStreamPlayerManager
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -40,6 +41,21 @@ class MyStreamApplication : Application(), SingletonImageLoader.Factory {
         com.mystream.app.data.youtube.YouTubeTrailerResolver.init(
             com.mystream.app.data.youtube.NewPipeDownloader(ytClient)
         )
+
+        // Publish a "Watch Next"/recommendations row on the Android TV home screen.
+        if (com.mystream.app.ui.utils.DeviceUtils.isTvDevice(this)) {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                try {
+                    val trending = sourcesRepository.fetchCatalog("movie", "top", skip = 0)
+                    android.util.Log.d("TvRecommendations", "Fetched ${trending.metas.size} movies for recommendations")
+                    com.mystream.app.tv.TvRecommendationsPublisher.publish(this@MyStreamApplication, trending.metas)
+                } catch (e: Exception) {
+                    android.util.Log.e("TvRecommendations", "publish pipeline failed", e)
+                }
+            }
+        } else {
+            android.util.Log.d("TvRecommendations", "Not a TV device, skipping recommendations")
+        }
     }
 
     private var imageLoaderInstance: ImageLoader? = null

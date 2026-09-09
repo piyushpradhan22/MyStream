@@ -11,6 +11,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Android TV home screen recommendations ("Watch Next" / channel rows) -->
+    <uses-permission android:name="com.android.providers.tv.permission.READ_EPG_DATA" />
+    <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" />
+
     <!-- Android TV compatibility features -->
     <uses-feature
         android:name="android.software.leanback"
@@ -54,6 +58,11 @@
         tools:targetApi="35">
 
         <profileable android:shell="true" />
+
+        <!-- App Actions: lets Google Assistant / Android TV search route "play <movie>" queries here -->
+        <meta-data
+            android:name="com.google.android.actions"
+            android:resource="@xml/actions" />
 
         <activity
             android:name=".MainActivity"

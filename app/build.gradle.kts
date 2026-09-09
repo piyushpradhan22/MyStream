@@ -15,8 +15,8 @@ android {
         applicationId = "com.mystream.app"
         minSdk = 30
         targetSdk = 35
-        versionCode = 22
-        versionName = "1.3.0"
+        versionCode = 23
+        versionName = "1.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -102,6 +102,9 @@ dependencies {
     // Android TV Compose
     implementation(libs.androidx.tv.foundation)
     implementation(libs.androidx.tv.material)
+
+    // Android TV home screen recommendations ("Watch Next" channel)
+    implementation(libs.androidx.tv.provider)
 
     // Media3 (ExoPlayer, Session, UI, HLS, DASH)
     implementation(libs.androidx.media3.exoplayer)

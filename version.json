@@ -1,7 +1,7 @@
 {
-  "versionCode": 22,
-  "versionName": "1.3.0",
-  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.3.0/app-universal-release.apk",
-  "changelog": "• 🐛 Fixed black screen after playback: pressing Back once from the video player now returns you straight to the title, instead of a blank screen that needed a second Back press\n• 🎬 Correct trailers on detail pages: a title now always shows its own trailer (no more leftover trailer from the previous title), and a trailer you paused on Home stays paused when you open a title\n• 🏠 Fixed navigation dead-end: pressing Down from the featured banner reliably moves into the content rows again\n• ✅ Based on 1.2.0: native trailer playback, faster cold-start and smoother scrolling, smarter Home, cleaner player, and refreshed design"
+  "versionCode": 23,
+  "versionName": "1.3.1",
+  "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.3.1/app-universal-release.apk",
+  "changelog": "• 📺 Added Android TV home screen recommendations: MyStream now publishes a trending channel row for supported TV launchers\n• 🔎 Added media action routing: Android TV / Assistant play and watch requests can deep link into MyStream search\n• 🏠 Reuses the existing MyStream recommendations channel across launches to avoid duplicate home screen rows\n• ✅ Based on 1.3.0: black-screen back navigation fix, correct detail trailers, reliable hero-to-row focus, native trailers, and performance improvements"
 }
 
