@@ -195,29 +195,11 @@ fun HomeScreen(
     var comedySeries by remember { mutableStateOf(homeCache.comedySeries) }
     var isLoading by remember { mutableStateOf(!homeCache.loaded) }
 
-    // Navigation & Category Selection State
-    var selectedNavDestination by remember { mutableStateOf(OttNavDestination.HOME) }
+    // Category Selection State
     var selectedCategoryId by rememberSaveable { mutableStateOf("trending") }
-    val sidebarHomeFocusRequester = remember { FocusRequester() }
-    var isHomeSidebarFocused by remember { mutableStateOf(false) }
-
-    // Intercept back button: highlight Home button on sidebar first, then show exit dialog
-    BackHandler(enabled = true) {
-        android.util.Log.d("HomeScreenBack", "BackHandler triggered! isHomeSidebarFocused=$isHomeSidebarFocused")
-        if (!isHomeSidebarFocused) {
-            try {
-                selectedNavDestination = OttNavDestination.HOME
-                val ok = sidebarHomeFocusRequester.requestFocus()
-                android.util.Log.d("HomeScreenBack", "sidebarHomeFocusRequester.requestFocus() returned: $ok")
-            } catch (e: Exception) {
-                android.util.Log.e("HomeScreenBack", "sidebarHomeFocusRequester.requestFocus() threw exception", e)
-                showExitConfirmationDialog = true
-            }
-        } else {
-            android.util.Log.d("HomeScreenBack", "Already focused on home sidebar, showing exit dialog")
-            showExitConfirmationDialog = true
-        }
-    }
+    val sidebarExitFocusRequester = remember { FocusRequester() }
+    // True whenever focus is anywhere inside the left sidebar (not just Exit App).
+    var isSidebarFocused by remember { mutableStateOf(false) }
 
     // Hero Spotlight State
     var focusedItem by remember { mutableStateOf<StremioMetaPreview?>(null) }
@@ -229,10 +211,9 @@ fun HomeScreen(
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val searchFocusRequester = remember { FocusRequester() }
     val playHeroFocusRequester = remember { FocusRequester() }
-    val categoryPillFirstItemFR = remember { FocusRequester() }
     var focusedCardIndex by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
     val cardFocusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
-    val categoryPillFocusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
+    val categorySidebarFocusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
     val carouselListState = rememberLazyListState(initialFirstVisibleItemIndex = focusedCardIndex)
     var isLoadingMoreCategoryItems by remember { mutableStateOf(false) }
     var isRestoringFocus by remember { mutableStateOf(false) }
@@ -423,7 +404,7 @@ fun HomeScreen(
             list.add(OttCategory("continue_watching", "Continue Watching"))
         }
         if (hfCatalogItems.isNotEmpty()) {
-            list.add(OttCategory("hf_direct", "⚡ HF Direct", type = "movie", catalogId = "hftor"))
+            list.add(OttCategory("hf_direct", "HF Direct", type = "movie", catalogId = "hftor"))
         }
         indianCategories.forEachIndexed { index, pair ->
             list.add(OttCategory("indian_$index", pair.first))
@@ -437,6 +418,23 @@ fun HomeScreen(
             list.add(OttCategory("watchlist", "My Watchlist"))
         }
         list
+    }
+
+    // Intercept back button: move focus to the sidebar's currently active category first (never Exit
+    // App directly), then show the exit dialog only if focus is already inside the sidebar.
+    BackHandler(enabled = true) {
+        if (!isSidebarFocused) {
+            val activeCategoryIndex = categories.indexOfFirst { it.id == selectedCategoryId }.coerceAtLeast(0)
+            val targetFR = categorySidebarFocusRequesters[activeCategoryIndex] ?: sidebarExitFocusRequester
+            try {
+                targetFR.requestFocus()
+            } catch (e: Exception) {
+                android.util.Log.e("HomeScreenBack", "sidebar focus request threw exception", e)
+                showExitConfirmationDialog = true
+            }
+        } else {
+            showExitConfirmationDialog = true
+        }
     }
 
     // Get items for currently selected category
@@ -549,6 +547,17 @@ fun HomeScreen(
         if (!hasRequestedInitialFocus && currentCategoryItems.isNotEmpty()) {
             hasRequestedInitialFocus = true
             focusCardAtIndex(focusedCardIndex)
+        }
+    }
+
+    // Safety net: grab D-pad focus onto the hero (never the sidebar) almost immediately, so a fresh
+    // app start never lands the system's default initial focus on the sidebar's Exit App button while
+    // the first category's cards are still loading. The effect above steals focus onto the actual
+    // card as soon as it's ready, overriding this placeholder.
+    LaunchedEffect(Unit) {
+        delay(30)
+        if (!hasRequestedInitialFocus) {
+            try { playHeroFocusRequester.requestFocus() } catch (_: Exception) {}
         }
     }
 
@@ -691,46 +700,25 @@ fun HomeScreen(
         }
     }
 
-    // Main JioHotstar OTT Layout: Left Sidebar + Main Content (Spotlight + Middle Carousel + Very Bottom Category Pills)
+    // Main OTT Layout: Left Sidebar (nav + categories) + Full-Screen Hero with Carousel Overlaid at the Bottom
     Row(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Transparent)
     ) {
-        // 1. Left Navigation Rail (Narrow 52dp Glass Sidebar)
+        // 1. Left Navigation Rail: Exit App (top) + Search/Custom URL/Settings + all categories (bottom).
+        // Collapsed = icons only; expands into a full label bar while any item inside it has focus.
         OttLeftSidebar(
-            selectedDestination = selectedNavDestination,
-            onSelectDestination = { dest ->
-                selectedNavDestination = dest
-                when (dest) {
-                    OttNavDestination.SEARCH -> onNavigateToSearch()
-                    OttNavDestination.SETTINGS -> onNavigateToSources()
-                    OttNavDestination.CUSTOM_URL -> showCustomUrlDialog = true
-                    OttNavDestination.MOVIES -> {
-                        // Map to the Indian catalog's "Movies" category (not cinemeta). Preview effect focuses its first card.
-                        selectedCategoryId = categories.firstOrNull { it.title.equals("Movies", ignoreCase = true) }?.id ?: "trending"
-                    }
-                    OttNavDestination.SERIES -> {
-                        // Map to the Indian catalog's "Series" category (not cinemeta).
-                        selectedCategoryId = categories.firstOrNull { it.title.equals("Series", ignoreCase = true) }?.id ?: "series"
-                    }
-                    OttNavDestination.WATCHLIST -> {
-                        selectedCategoryId = "watchlist"
-                        val first = watchlist.firstOrNull()
-                        if (first != null) {
-                            focusedItem = StremioMetaPreview(
-                                id = first.imdbId,
-                                type = first.type,
-                                name = first.title,
-                                poster = first.posterUrl
-                            )
-                        }
-                    }
-                    OttNavDestination.HOME -> {
-                        selectedCategoryId = if (continueWatchingList.isNotEmpty()) "continue_watching" else "trending"
-                    }
-                }
+            categories = categories,
+            selectedCategoryId = selectedCategoryId,
+            onSelectCategory = { id ->
+                // Switch category; the preview effect updates hero/trailer to its first card.
+                selectedCategoryId = id
             },
+            onExit = { showExitConfirmationDialog = true },
+            onSearch = onNavigateToSearch,
+            onCustomUrl = { showCustomUrlDialog = true },
+            onSettings = onNavigateToSources,
             onNavigateRight = {
                 try {
                     val targetFR = cardFocusRequesters[focusedCardIndex] ?: cardFocusRequesters[0] ?: playHeroFocusRequester
@@ -740,17 +728,18 @@ fun HomeScreen(
                 }
             },
             searchFocusRequester = searchFocusRequester,
-            homeFocusRequester = sidebarHomeFocusRequester,
-            onHomeFocusChanged = { isHomeSidebarFocused = it }
+            exitFocusRequester = sidebarExitFocusRequester,
+            onSidebarFocusChanged = { isSidebarFocused = it },
+            categoryFocusRequesters = categorySidebarFocusRequesters
         )
 
-        // 2. Main OTT Content Showcase
-        Column(
+        // 2. Main OTT Content: Full-screen Hero Spotlight (trailer plays full screen, same as DetailScreen)
+        // with the category carousel overlaid at the very bottom for a seamless, uninterrupted video.
+        Box(
             modifier = Modifier
                 .fillMaxHeight()
                 .weight(1f)
         ) {
-            // Top Section (53% Height): Hero Spotlight with Ambient Video Trailer & Audio
             OttHeroSpotlight(
                 item = focusedItem,
                 trailerYtId = currentTrailerYtId,
@@ -800,440 +789,118 @@ fun HomeScreen(
                     try { searchFocusRequester.requestFocus() } catch (_: Exception) {}
                 },
                 watchlistFocusRequester = playHeroFocusRequester,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.53f)
+                modifier = Modifier.fillMaxSize()
             )
 
-            // Bottom Section (47% Height): Middle Carousel + Very Bottom Category Pills
-            Column(
+            // Bottom overlay: category cards carousel, pinned at the extreme bottom of the full-screen hero
+            // (small overscan-safe gap so poster labels stay fully visible).
+            Box(
                 modifier = Modifier
+                    .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .weight(0.47f)
-                    .background(HotstarBg)
-                    .padding(bottom = 4.dp)
+                    .padding(bottom = 8.dp)
             ) {
-                // Middle: Single Category Cards Carousel Row
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                ) {
-                    if (isLoading && currentCategoryItems.isEmpty()) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                color = FocusRing,
-                                modifier = Modifier.size(28.dp),
-                                strokeWidth = 2.dp
-                            )
-                        }
-                    } else {
-                        LazyRow(
-                            state = carouselListState,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(vertical = 2.dp),
-                            contentPadding = PaddingValues(horizontal = 24.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            itemsIndexed(
-                                items = currentCategoryItems,
-                                key = { _, item -> "${selectedCategoryId}_${item.id}" },
-                                contentType = { _, _ -> "poster" }
-                            ) { index, meta ->
-                                val isFirstCard = index == 0
-                                val progressFraction = if (selectedCategoryId == "continue_watching") {
-                                    continueWatchingList.firstOrNull { it.imdbId == meta.id }?.progressFraction
-                                } else null
-                                val cardFR = cardFocusRequesters.getOrPut(index) { FocusRequester() }
-
-                                PosterCard(
-                                    item = meta,
-                                    width = 110,
-                                    progressFraction = progressFraction,
-                                    modifier = Modifier
-                                        .focusRequester(cardFR)
-                                        .onFocusChanged { focusState ->
-                                            if (focusState.isFocused) {
-                                                if (!isRestoringFocus || index == focusedCardIndex) {
-                                                    focusedItem = meta
-                                                    focusedCardIndex = index
-                                                }
-                                            }
-                                        }
-                                        .onPreviewKeyEvent { keyEvent ->
-                                            if (keyEvent.type == KeyEventType.KeyDown) {
-                                                when (keyEvent.key) {
-                                                    Key.DirectionLeft -> {
-                                                        if (isFirstCard) {
-                                                            try { sidebarHomeFocusRequester.requestFocus(); true } catch (_: Exception) { false }
-                                                        } else {
-                                                            false // Let Compose LazyRow handle natural left scrolling & focus
-                                                        }
-                                                    }
-                                                    Key.DirectionRight -> {
-                                                        false // Let Compose LazyRow handle natural right scrolling & focus
-                                                    }
-                                                    Key.DirectionUp -> {
-                                                        try {
-                                                            playHeroFocusRequester.requestFocus()
-                                                            true
-                                                        } catch (_: Exception) {
-                                                            focusManager.moveFocus(FocusDirection.Up)
-                                                        }
-                                                    }
-                                                    Key.DirectionDown -> {
-                                                        val activePillIndex = categories.indexOfFirst { it.id == selectedCategoryId }.coerceAtLeast(0)
-                                                        val pillFR = categoryPillFocusRequesters[activePillIndex] ?: categoryPillFirstItemFR
-                                                        try {
-                                                             pillFR.requestFocus()
-                                                             true
-                                                        } catch (_: Exception) {
-                                                            focusManager.moveFocus(FocusDirection.Down)
-                                                        }
-                                                    }
-                                                    else -> false
-                                                }
-                                            } else false
-                                        },
-                                    onClick = {
-                                        focusedItem = meta
-                                        homeCache.suppressNextAutoplay = true
-                                        onNavigateToDetail(meta.type, meta.id)
-                                    }
-                                )
-                            }
-
-                            if (isLoadingMoreCategoryItems) {
-                                item(key = "${selectedCategoryId}_loading_more") {
-                                    Box(
-                                        modifier = Modifier
-                                            .height(160.dp)
-                                            .width(70.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CircularProgressIndicator(
-                                            color = FocusRing,
-                                            modifier = Modifier.size(24.dp),
-                                            strokeWidth = 2.dp
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // VERY BOTTOM: Category Switcher Pills Row (Hotstar Style)
-                LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 24.dp, end = 24.dp, bottom = 4.dp, top = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    itemsIndexed(categories) { index, category ->
-                        val isSelected = category.id == selectedCategoryId
-                        val pillFR = categoryPillFocusRequesters.getOrPut(index) { FocusRequester() }
-
-                        CategoryPill(
-                            title = category.title,
-                            isSelected = isSelected,
-                            focusRequester = pillFR,
-                            onClick = {
-                                // Switch category; the preview effect updates hero/trailer to its first card.
-                                selectedCategoryId = category.id
-                            },
-                            onNavigateDown = {
-                                // Already at bottom edge
-                            },
-                            onNavigateUp = {
-                                val targetIndex = focusedCardIndex.coerceIn(0, (currentCategoryItems.size - 1).coerceAtLeast(0))
-                                val targetFR = cardFocusRequesters[targetIndex] ?: cardFocusRequesters[0]
-                                if (targetFR != null) {
-                                    try {
-                                        targetFR.requestFocus()
-                                    } catch (_: Exception) {
-                                        focusManager.moveFocus(FocusDirection.Up)
-                                    }
-                                } else {
-                                    focusManager.moveFocus(FocusDirection.Up)
-                                }
-                            },
-                            onNavigateLeft = if (index == 0) {
-                                {
-                                    try { sidebarHomeFocusRequester.requestFocus() } catch (_: Exception) {}
-                                }
-                            } else null
+                if (isLoading && currentCategoryItems.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(160.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = FocusRing,
+                            modifier = Modifier.size(28.dp),
+                            strokeWidth = 2.dp
                         )
                     }
-                }
-            }
-        }
-    }
-}
+                } else {
+                    LazyRow(
+                        state = carouselListState,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        contentPadding = PaddingValues(horizontal = 24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        itemsIndexed(
+                            items = currentCategoryItems,
+                            key = { _, item -> "${selectedCategoryId}_${item.id}" },
+                            contentType = { _, _ -> "poster" }
+                        ) { index, meta ->
+                            val isFirstCard = index == 0
+                            val progressFraction = if (selectedCategoryId == "continue_watching") {
+                                continueWatchingList.firstOrNull { it.imdbId == meta.id }?.progressFraction
+                            } else null
+                            val cardFR = cardFocusRequesters.getOrPut(index) { FocusRequester() }
 
-@Composable
-private fun CategoryPill(
-    title: String,
-    isSelected: Boolean,
-    focusRequester: FocusRequester? = null,
-    onClick: () -> Unit,
-    onNavigateDown: () -> Unit,
-    onNavigateUp: () -> Unit,
-    onNavigateLeft: (() -> Unit)? = null
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-
-    // Focused pill = solid bright accent with dark text (pops); selected = subtle tint; else faint glass.
-    val bg = when {
-        isFocused -> FocusRing
-        isSelected -> HotstarPillActiveBg
-        else -> Color(0x14FFFFFF)
-    }
-
-    val textColor = when {
-        isFocused -> Color(0xFF06080E)
-        isSelected -> HotstarPillActive
-        else -> HotstarPillInactiveText
-    }
-
-    val border = when {
-        isFocused -> androidx.compose.foundation.BorderStroke(0.dp, Color.Transparent)
-        isSelected -> androidx.compose.foundation.BorderStroke(1.dp, HotstarPillActive.copy(alpha = 0.55f))
-        else -> androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
-    }
-
-    Box(
-        modifier = Modifier
-            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .height(34.dp)
-            .clip(RoundedCornerShape(17.dp))
-            .background(bg)
-            .border(border.width, border.brush, RoundedCornerShape(17.dp))
-            .focusable(interactionSource = interactionSource)
-            .onPreviewKeyEvent { keyEvent ->
-                if (keyEvent.type == KeyEventType.KeyDown) {
-                    when (keyEvent.key) {
-                        Key.DirectionDown -> {
-                            onNavigateDown()
-                            true
+                            PosterCard(
+                                item = meta,
+                                width = 110,
+                                progressFraction = progressFraction,
+                                modifier = Modifier
+                                    .focusRequester(cardFR)
+                                    .onFocusChanged { focusState ->
+                                        if (focusState.isFocused) {
+                                            if (!isRestoringFocus || index == focusedCardIndex) {
+                                                focusedItem = meta
+                                                focusedCardIndex = index
+                                            }
+                                        }
+                                    }
+                                    .onPreviewKeyEvent { keyEvent ->
+                                        if (keyEvent.type == KeyEventType.KeyDown) {
+                                            when (keyEvent.key) {
+                                                Key.DirectionLeft -> {
+                                                    if (isFirstCard) {
+                                                        val activeCategoryIndex = categories.indexOfFirst { it.id == selectedCategoryId }.coerceAtLeast(0)
+                                                        val sidebarFR = categorySidebarFocusRequesters[activeCategoryIndex] ?: sidebarExitFocusRequester
+                                                        try { sidebarFR.requestFocus(); true } catch (_: Exception) { false }
+                                                    } else {
+                                                        false // Let Compose LazyRow handle natural left scrolling & focus
+                                                    }
+                                                }
+                                                Key.DirectionRight -> {
+                                                    false // Let Compose LazyRow handle natural right scrolling & focus
+                                                }
+                                                Key.DirectionUp -> {
+                                                    try {
+                                                        playHeroFocusRequester.requestFocus()
+                                                        true
+                                                    } catch (_: Exception) {
+                                                        focusManager.moveFocus(FocusDirection.Up)
+                                                    }
+                                                }
+                                                else -> false
+                                            }
+                                        } else false
+                                    },
+                                onClick = {
+                                    focusedItem = meta
+                                    homeCache.suppressNextAutoplay = true
+                                    onNavigateToDetail(meta.type, meta.id)
+                                }
+                            )
                         }
-                        Key.DirectionUp -> {
-                            onNavigateUp()
-                            true
+
+                        if (isLoadingMoreCategoryItems) {
+                            item(key = "${selectedCategoryId}_loading_more") {
+                                Box(
+                                    modifier = Modifier
+                                        .height(160.dp)
+                                        .width(70.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = FocusRing,
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                }
+                            }
                         }
-                        Key.DirectionLeft -> {
-                            if (onNavigateLeft != null) {
-                                onNavigateLeft()
-                                true
-                            } else false
-                        }
-                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                            onClick()
-                            true
-                        }
-                        else -> false
                     }
-                } else false
-            }
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            CategoryBadgeIcon(categoryName = title)
-            Text(
-                text = title,
-                color = textColor,
-                fontSize = 11.sp,
-                fontWeight = if (isSelected || isFocused) FontWeight.Bold else FontWeight.Medium
-            )
-        }
-    }
-}
-
-@Composable
-private fun CategoryBadgeIcon(categoryName: String) {
-    val clean = categoryName.trim()
-    when {
-        clean.contains("Netflix", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFFE50914))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "N",
-                    color = Color.White,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 10.sp,
-                    letterSpacing = 0.5.sp
-                )
-            }
-        }
-        clean.contains("Prime", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFF00A8E1))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "prime",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 9.sp
-                )
-            }
-        }
-        clean.contains("Disney", ignoreCase = true) || clean.contains("Hotstar", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFF0F1035))
-                    .border(0.8.dp, Color(0xFF1E88E5), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Disney+",
-                    color = Color(0xFF90CAF9),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 9.sp
-                )
-            }
-        }
-        clean.contains("Jio", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFFE50055))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Jio",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 9.sp
-                )
-            }
-        }
-        clean.contains("Zee5", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFF8224E3))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "ZEE5",
-                    color = Color.White,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 8.5.sp
-                )
-            }
-        }
-        clean.contains("Sony", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFFFF6900))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "LIV",
-                    color = Color.White,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 9.sp
-                )
-            }
-        }
-        clean.contains("HF", ignoreCase = true) || clean.contains("HuggingFace", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFFFFB300).copy(alpha = 0.2f))
-                    .border(0.8.dp, Color(0xFFFFB300), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "⚡ HF",
-                    color = Color(0xFFFFD54F),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 8.5.sp
-                )
-            }
-        }
-        clean.equals("Top Rated", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFFF5C518))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "★ TOP",
-                    color = Color.Black,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 8.5.sp
-                )
-            }
-        }
-        clean.contains("Hindi", ignoreCase = true) -> {
-            Text(
-                text = "🇮🇳",
-                fontSize = 12.sp
-            )
-        }
-        clean.contains("Series", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0x3300E5FF))
-                    .border(0.8.dp, Color(0xFF00E5FF), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "SERIES",
-                    color = Color(0xFF00E5FF),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 8.5.sp
-                )
-            }
-        }
-        clean.contains("Movie", ignoreCase = true) -> {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0x336C5CE7))
-                    .border(0.8.dp, Color(0xFF6C5CE7), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "MOVIE",
-                    color = Color(0xFFA29BFE),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 8.5.sp
-                )
+                }
             }
         }
     }

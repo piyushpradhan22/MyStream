@@ -142,9 +142,11 @@ class MainActivity : ComponentActivity() {
                 TrailerPlaybackManager.isPlaybackEnabled &&
                 !TrailerPlaybackManager.activeTrailerYtId.isNullOrBlank()
             ) {
+                // Home now plays the trailer full screen (same as DetailScreen), so the animated resize
+                // is a no-op width/height (both 1.0f) — this keeps the player alive & never restarts it.
                 val isHomeScreen = currentRoute == "home"
-                val targetWidth = if (isHomeScreen) 0.72f else 1.0f
-                val targetHeight = if (isHomeScreen) 0.62f else 1.0f
+                val targetWidth = 1.0f
+                val targetHeight = 1.0f
 
                 val animWidth by androidx.compose.animation.core.animateFloatAsState(
                     targetValue = targetWidth,
