@@ -1,6 +1,6 @@
 {
-  "versionCode": 26,
-  "versionName": "1.3.4",
+  "versionCode": 27,
+  "versionName": "1.3.5",
   "downloadUrl": "https://github.com/piyushpradhan22/MyStream/releases/download/v1.3.4/app-universal-release.apk",
   "changelog": "• 🏠 Home screen redesign: bottom category bar moved into a Netflix-style left sidebar (icon-only when idle, expands with labels on focus)\n• 🚪 Added an Exit App entry pinned to the top of the sidebar; Custom URL and Settings follow, then all categories\n• 🎬 Trailer now plays full screen on Home (same as the detail page) with category cards overlaid at the very bottom — never interrupted when opening a title\n• 🔁 App starts focused on Continue Watching (or Movies if nothing in progress) instead of a Home button\n• 🧹 Removed duplicate HF Direct lightning icon and restored missing/relevant category icons"
 }

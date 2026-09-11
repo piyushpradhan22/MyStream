@@ -554,37 +554,27 @@ fun HomeScreen(
 
     // Auto-focus the first card on initial load and explicitly clear any lingering sidebar focus,
     // so a fresh app start never leaves the Exit App button highlighted.
-    var hasRequestedInitialFocus by remember { mutableStateOf(false) }
-    LaunchedEffect(currentCategoryItems.isNotEmpty(), selectedCategoryId) {
-        if (currentCategoryItems.isEmpty() || hasRequestedInitialFocus) return@LaunchedEffect
+    // The effect must re-run when card requesters become available, otherwise a late composition
+    // can leave the app with no focused action at all.
+    LaunchedEffect(currentCategoryItems.isNotEmpty(), selectedCategoryId, cardFocusRequesters.size) {
+        if (currentCategoryItems.isEmpty()) return@LaunchedEffect
 
         // Clear any default focus that landed on the left sidebar before the content cards are ready.
         try {
             focusManager.clearFocus(force = true)
         } catch (_: Exception) {}
 
-        for (attempt in 0..20) {
-            if (cardFocusRequesters.containsKey(0)) {
-                hasRequestedInitialFocus = true
-                focusCardAtIndex(0)
-                return@LaunchedEffect
-            }
-            delay(50)
+        if (cardFocusRequesters.containsKey(0)) {
+            focusCardAtIndex(0)
         }
-
-        hasRequestedInitialFocus = true
     }
 
     // When the selected category changes, explicitly move focus onto that category's first card.
-    LaunchedEffect(selectedCategoryId, currentCategoryItems.size) {
+    LaunchedEffect(selectedCategoryId, currentCategoryItems.size, cardFocusRequesters.size) {
         if (currentCategoryItems.isEmpty()) return@LaunchedEffect
 
-        for (attempt in 0..20) {
-            if (cardFocusRequesters.containsKey(0)) {
-                focusCardAtIndex(0)
-                return@LaunchedEffect
-            }
-            delay(50)
+        if (cardFocusRequesters.containsKey(0)) {
+            focusCardAtIndex(0)
         }
     }
 
