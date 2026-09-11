@@ -338,7 +338,8 @@ data class AppSettingsConfig(
     val debridApiKey: String? = null,
     val customServerUrl: String? = null,
     val trailerPlaybackEnabled: Boolean = true, // default: ON
-    val trailerAudioMuted: Boolean = false // default: false (audio ON per user preference)
+    val trailerAudioMuted: Boolean = false, // default: false (audio ON per user preference)
+    val trailerPlaybackQuality: String = "480p" // default: 480p background trailer quality
 )
 
 @Serializable

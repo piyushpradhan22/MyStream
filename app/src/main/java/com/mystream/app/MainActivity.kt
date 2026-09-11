@@ -177,6 +177,7 @@ class MainActivity : ComponentActivity() {
                         isAudioMuted = TrailerPlaybackManager.isAudioMuted,
                         isStopped = TrailerPlaybackManager.isStopped,
                         isHomeScreen = isHomeScreen,
+                        preferredResolution = appSettings.trailerPlaybackQuality,
                         onPlaybackStarted = {
                             TrailerPlaybackManager.isVideoPlaying = true
                         },

@@ -12,6 +12,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -158,16 +160,26 @@ fun OttLeftSidebar(
     modifier: Modifier = Modifier,
     searchFocusRequester: FocusRequester? = null,
     exitFocusRequester: FocusRequester? = null,
+    sidebarFocusable: Boolean = true,
     onSidebarFocusChanged: ((Boolean) -> Unit)? = null,
     categoryFocusRequesters: MutableMap<Int, FocusRequester>? = null
 ) {
     var isExpanded by remember { mutableStateOf(false) }
+    val handleRightNavigation = {
+        isExpanded = false
+        onNavigateRight()
+    }
+    val categoryListState = rememberLazyListState()
     val sidebarWidth by animateDpAsState(
         targetValue = if (isExpanded) SIDEBAR_EXPANDED_WIDTH.dp else SIDEBAR_COLLAPSED_WIDTH.dp,
         animationSpec = tween(220),
         label = "SidebarWidth"
     )
     val sidebarBg = if (isExpanded) HotstarSidebarGlassExpanded else HotstarSidebarGlass
+
+    LaunchedEffect(categories) {
+        categoryListState.scrollToItem(0)
+    }
 
     Box(
         modifier = modifier
@@ -181,7 +193,6 @@ fun OttLeftSidebar(
                 shape = RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp)
             )
             .onFocusChanged { state ->
-                isExpanded = state.hasFocus
                 onSidebarFocusChanged?.invoke(state.hasFocus)
             }
             .padding(vertical = 12.dp),
@@ -233,8 +244,10 @@ fun OttLeftSidebar(
                     isSelected = false,
                     isExpanded = isExpanded,
                     focusRequester = exitFocusRequester,
+                    isFocusable = sidebarFocusable,
                     onClick = onExit,
-                    onNavigateRight = onNavigateRight
+                    onNavigateLeft = { isExpanded = !isExpanded },
+                    onNavigateRight = handleRightNavigation
                 )
             }
 
@@ -255,6 +268,7 @@ fun OttLeftSidebar(
                         isSelected = false,
                         isExpanded = isExpanded,
                         focusRequester = fr,
+                        isFocusable = sidebarFocusable,
                         onClick = {
                             when (item.destination) {
                                 OttNavDestination.SEARCH -> onSearch()
@@ -263,7 +277,8 @@ fun OttLeftSidebar(
                                 else -> {}
                             }
                         },
-                        onNavigateRight = onNavigateRight
+                        onNavigateLeft = { isExpanded = !isExpanded },
+                        onNavigateRight = handleRightNavigation
                     )
                 }
             }
@@ -274,6 +289,7 @@ fun OttLeftSidebar(
 
             // Categories (scrollable, fills remaining space)
             LazyColumn(
+                state = categoryListState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -287,8 +303,10 @@ fun OttLeftSidebar(
                         isSelected = category.id == selectedCategoryId,
                         isExpanded = isExpanded,
                         focusRequester = fr,
+                        isFocusable = sidebarFocusable,
                         onClick = { onSelectCategory(category.id) },
-                        onNavigateRight = onNavigateRight
+                        onNavigateLeft = { isExpanded = !isExpanded },
+                        onNavigateRight = handleRightNavigation
                     )
                 }
             }
@@ -314,7 +332,9 @@ private fun OttSidebarButton(
     isSelected: Boolean,
     isExpanded: Boolean,
     focusRequester: FocusRequester? = null,
+    isFocusable: Boolean = true,
     onClick: () -> Unit,
+    onNavigateLeft: (() -> Unit)? = null,
     onNavigateRight: () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -345,10 +365,14 @@ private fun OttSidebarButton(
             )
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { state -> isFocused = state.isFocused }
-            .focusable(interactionSource = interactionSource)
+            .focusable(interactionSource = interactionSource, enabled = isFocusable)
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.type == KeyEventType.KeyDown) {
                     when (keyEvent.key) {
+                        Key.DirectionLeft -> {
+                            onNavigateLeft?.invoke()
+                            true
+                        }
                         Key.DirectionRight -> {
                             onNavigateRight()
                             true
@@ -361,7 +385,12 @@ private fun OttSidebarButton(
                     }
                 } else false
             }
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = isFocusable,
+                onClick = onClick
+            )
             .padding(vertical = 6.dp, horizontal = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

@@ -45,7 +45,7 @@ object YouTubeTrailerResolver {
         }
     }
 
-    suspend fun resolve(ytId: String): ResolvedTrailer? {
+    suspend fun resolve(ytId: String, preferredResolution: String = "480p"): ResolvedTrailer? {
         if (ytId.isBlank()) return null
         synchronized(cache) {
             cache[ytId]?.let { if (it.expiresAt > System.currentTimeMillis()) return it.trailer }
@@ -74,10 +74,29 @@ object YouTubeTrailerResolver {
                     }
                 }
 
-                val selected = candidates.minWithOrNull(
-                    compareBy<TrailerVideoCandidate> { resolutionRank(it.resolution) }
-                        .thenBy { if (it.isMuxed) 0 else 1 }
-                )
+                val selected = candidates.minWithOrNull { a, b ->
+                    val targetHeight = parseResolutionHeight(preferredResolution) ?: 480
+                    val aHeight = parseResolutionHeight(a.resolution)
+                    val bHeight = parseResolutionHeight(b.resolution)
+
+                    val aMatchesTarget = if (aHeight == targetHeight) 0 else 1
+                    val bMatchesTarget = if (bHeight == targetHeight) 0 else 1
+                    if (aMatchesTarget != bMatchesTarget) {
+                        return@minWithOrNull aMatchesTarget.compareTo(bMatchesTarget)
+                    }
+
+                    val aDistance = if (aHeight != null) kotlin.math.abs(aHeight - targetHeight) else Int.MAX_VALUE
+                    val bDistance = if (bHeight != null) kotlin.math.abs(bHeight - targetHeight) else Int.MAX_VALUE
+                    if (aDistance != bDistance) {
+                        return@minWithOrNull aDistance.compareTo(bDistance)
+                    }
+
+                    if (a.isMuxed != b.isMuxed) {
+                        return@minWithOrNull if (a.isMuxed) -1 else 1
+                    }
+
+                    0
+                }
 
                 val resolved = selected?.let { ResolvedTrailer(videoUrl = it.videoUrl, audioUrl = it.audioUrl) }
 
@@ -94,11 +113,7 @@ object YouTubeTrailerResolver {
         }
     }
 
-    // Lower rank = preferred. Target 720p for sharper TV backgrounds, then fall back to 480p/360p.
-    private fun resolutionRank(resolution: String?): Int {
-        val height = resolution?.substringBefore('p')?.trim()?.toIntOrNull() ?: return Int.MAX_VALUE
-        val preferredHeights = listOf(720, 480, 360, 1080, 240)
-        val nearestPreferredIndex = preferredHeights.indices.minBy { kotlin.math.abs(preferredHeights[it] - height) }
-        return nearestPreferredIndex * 10_000 + kotlin.math.abs(preferredHeights[nearestPreferredIndex] - height)
+    private fun parseResolutionHeight(resolution: String?): Int? {
+        return resolution?.substringBefore('p')?.trim()?.toIntOrNull()
     }
 }

@@ -196,8 +196,18 @@ fun HomeScreen(
     var isLoading by remember { mutableStateOf(!homeCache.loaded) }
 
     // Category Selection State
-    var selectedCategoryId by rememberSaveable { mutableStateOf("trending") }
+    var selectedCategoryId by rememberSaveable {
+        mutableStateOf(
+            if (continueWatchingList.isNotEmpty()) {
+                "continue_watching"
+            } else {
+                val moviesIdx = homeCache.indianCategories.indexOfFirst { it.first.equals("Movies", ignoreCase = true) }
+                if (moviesIdx >= 0) "indian_$moviesIdx" else "trending"
+            }
+        )
+    }
     val sidebarExitFocusRequester = remember { FocusRequester() }
+    var sidebarFocusable by remember { mutableStateOf(false) }
     // True whenever focus is anywhere inside the left sidebar (not just Exit App).
     var isSidebarFocused by remember { mutableStateOf(false) }
 
@@ -427,6 +437,7 @@ fun HomeScreen(
             val activeCategoryIndex = categories.indexOfFirst { it.id == selectedCategoryId }.coerceAtLeast(0)
             val targetFR = categorySidebarFocusRequesters[activeCategoryIndex] ?: sidebarExitFocusRequester
             try {
+                sidebarFocusable = true
                 targetFR.requestFocus()
             } catch (e: Exception) {
                 android.util.Log.e("HomeScreenBack", "sidebar focus request threw exception", e)
@@ -541,23 +552,39 @@ fun HomeScreen(
         android.util.Log.w("HomeFocus", "focusCardAtIndex FAILED (target=$targetIdx, items=${currentCategoryItems.size}, visible=${carouselListState.layoutInfo.visibleItemsInfo.map { it.index }}, requesters=${cardFocusRequesters.keys})")
     }
 
-    // Auto-focus first card in bottom carousel on initial load (defaults to first card of Continue Watching)
+    // Auto-focus the first card on initial load and explicitly clear any lingering sidebar focus,
+    // so a fresh app start never leaves the Exit App button highlighted.
     var hasRequestedInitialFocus by remember { mutableStateOf(false) }
-    LaunchedEffect(currentCategoryItems.isNotEmpty()) {
-        if (!hasRequestedInitialFocus && currentCategoryItems.isNotEmpty()) {
-            hasRequestedInitialFocus = true
-            focusCardAtIndex(focusedCardIndex)
+    LaunchedEffect(currentCategoryItems.isNotEmpty(), selectedCategoryId) {
+        if (currentCategoryItems.isEmpty() || hasRequestedInitialFocus) return@LaunchedEffect
+
+        // Clear any default focus that landed on the left sidebar before the content cards are ready.
+        try {
+            focusManager.clearFocus(force = true)
+        } catch (_: Exception) {}
+
+        for (attempt in 0..20) {
+            if (cardFocusRequesters.containsKey(0)) {
+                hasRequestedInitialFocus = true
+                focusCardAtIndex(0)
+                return@LaunchedEffect
+            }
+            delay(50)
         }
+
+        hasRequestedInitialFocus = true
     }
 
-    // Safety net: grab D-pad focus onto the hero (never the sidebar) almost immediately, so a fresh
-    // app start never lands the system's default initial focus on the sidebar's Exit App button while
-    // the first category's cards are still loading. The effect above steals focus onto the actual
-    // card as soon as it's ready, overriding this placeholder.
-    LaunchedEffect(Unit) {
-        delay(30)
-        if (!hasRequestedInitialFocus) {
-            try { playHeroFocusRequester.requestFocus() } catch (_: Exception) {}
+    // When the selected category changes, explicitly move focus onto that category's first card.
+    LaunchedEffect(selectedCategoryId, currentCategoryItems.size) {
+        if (currentCategoryItems.isEmpty()) return@LaunchedEffect
+
+        for (attempt in 0..20) {
+            if (cardFocusRequesters.containsKey(0)) {
+                focusCardAtIndex(0)
+                return@LaunchedEffect
+            }
+            delay(50)
         }
     }
 
@@ -712,23 +739,23 @@ fun HomeScreen(
             categories = categories,
             selectedCategoryId = selectedCategoryId,
             onSelectCategory = { id ->
-                // Switch category; the preview effect updates hero/trailer to its first card.
+                // Switch category and immediately hand focus to that category's first card,
+                // so the highlighted item on the right matches the selected left sidebar section.
                 selectedCategoryId = id
+                scope.launch { focusCardAtIndex(0) }
             },
             onExit = { showExitConfirmationDialog = true },
             onSearch = onNavigateToSearch,
             onCustomUrl = { showCustomUrlDialog = true },
             onSettings = onNavigateToSources,
             onNavigateRight = {
-                try {
-                    val targetFR = cardFocusRequesters[focusedCardIndex] ?: cardFocusRequesters[0] ?: playHeroFocusRequester
-                    targetFR.requestFocus()
-                } catch (_: Exception) {
-                    try { playHeroFocusRequester.requestFocus() } catch (_: Exception) {}
+                scope.launch {
+                    focusCardAtIndex(focusedCardIndex)
                 }
             },
             searchFocusRequester = searchFocusRequester,
             exitFocusRequester = sidebarExitFocusRequester,
+            sidebarFocusable = sidebarFocusable,
             onSidebarFocusChanged = { isSidebarFocused = it },
             categoryFocusRequesters = categorySidebarFocusRequesters
         )
@@ -786,6 +813,7 @@ fun HomeScreen(
                     scope.launch { focusCardAtIndex(focusedCardIndex) }
                 },
                 onNavigateLeftToSidebar = {
+                    sidebarFocusable = true
                     try { searchFocusRequester.requestFocus() } catch (_: Exception) {}
                 },
                 watchlistFocusRequester = playHeroFocusRequester,
@@ -855,6 +883,7 @@ fun HomeScreen(
                                                     if (isFirstCard) {
                                                         val activeCategoryIndex = categories.indexOfFirst { it.id == selectedCategoryId }.coerceAtLeast(0)
                                                         val sidebarFR = categorySidebarFocusRequesters[activeCategoryIndex] ?: sidebarExitFocusRequester
+                                                        sidebarFocusable = true
                                                         try { sidebarFR.requestFocus(); true } catch (_: Exception) { false }
                                                     } else {
                                                         false // Let Compose LazyRow handle natural left scrolling & focus

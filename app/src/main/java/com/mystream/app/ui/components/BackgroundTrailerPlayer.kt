@@ -44,6 +44,7 @@ fun BackgroundTrailerPlayer(
     isAudioMuted: Boolean = false,
     isStopped: Boolean = false,
     isHomeScreen: Boolean = false,
+    preferredResolution: String = "480p",
     modifier: Modifier = Modifier,
     onPlaybackStarted: (() -> Unit)? = null,
     onVideoEnded: (() -> Unit)? = null
@@ -101,7 +102,7 @@ fun BackgroundTrailerPlayer(
         if (ytId.isBlank()) {
             return@LaunchedEffect
         }
-        val resolved = YouTubeTrailerResolver.resolve(ytId) ?: return@LaunchedEffect
+        val resolved = YouTubeTrailerResolver.resolve(ytId, preferredResolution) ?: return@LaunchedEffect
         val videoSource = ProgressiveMediaSource.Factory(dataSourceFactory)
             .createMediaSource(MediaItem.fromUri(resolved.videoUrl))
         val mediaSource = if (resolved.audioUrl != null) {

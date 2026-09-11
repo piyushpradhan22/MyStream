@@ -487,6 +487,60 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
+                        Text(
+                            text = "Background Trailer Quality",
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf("360p", "480p", "720p", "1080p").forEach { quality ->
+                                val isSel = appSettings.trailerPlaybackQuality.equals(quality, ignoreCase = true)
+                                val interactionSource = remember { MutableInteractionSource() }
+                                val isFocused by interactionSource.collectIsFocusedAsState()
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (isFocused) FocusRingOrange.copy(alpha = 0.25f)
+                                            else if (isSel) PrimaryNeon.copy(alpha = 0.25f)
+                                            else SurfaceCard
+                                        )
+                                        .border(
+                                            width = if (isFocused) 2.dp else 1.dp,
+                                            color = if (isFocused) FocusRingOrange
+                                            else if (isSel) PrimaryNeon
+                                            else Color.Transparent,
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .focusable(interactionSource = interactionSource)
+                                        .clickable(interactionSource = interactionSource, indication = null) {
+                                            scope.launch {
+                                                repository.updateAppSettings(appSettings.copy(trailerPlaybackQuality = quality))
+                                            }
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = quality,
+                                        color = if (isFocused) FocusRingOrange else if (isSel) TextPrimary else TextSecondary,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSel || isFocused) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
